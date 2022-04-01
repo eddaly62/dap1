@@ -16,20 +16,10 @@
 #include <stdbool.h>
 #include "dap.h"
 
-
-//#define MAX_PATTERN_BUF_SIZE 100
-//#define MATCH 0
 #define EXIT_STRING "q"     // string to type to exit program
-//#define ARRAY_SIZE(arr) (sizeof((arr)) / sizeof((arr)[0]))
-
-// input queue size
-//#define MAX_Q_SIZE 6
 
 // app supplied callback prototypes
 void callback(char *s);
-
-// vars
-
 
 // app supplied pattern/callback look up table 
 const struct DAP_PATTERN_CB relut[] = {
@@ -124,9 +114,5 @@ int main(int argc, char *argv[]) {
 
         }
     }
-    
-
-    
-
 
 }
