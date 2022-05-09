@@ -1,10 +1,21 @@
 #ifndef _DAP_H
 #define _DAP_H	1
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // dap.h
 
 // general use macros
 #define ARRAY_SIZE(arr) (sizeof((arr)) / sizeof((arr)[0]))
+
+
+// TODO change printf to write
+// Assertion of truth macro
+#define ASSERT(cond, desc) if( !(cond) )\
+{printf( "assertion error, %s, line %d, file(%s)\n", \
+desc, __LINE__, __FILE__ );}
 
 
 // DAP return codes
@@ -137,6 +148,8 @@ enum ELTIME {
 // returns elaped time from START to END in usec.
 long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *end);
 
-
+#ifdef __cplusplus
+}
+#endif
 
 #endif
