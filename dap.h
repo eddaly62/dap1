@@ -13,9 +13,10 @@ extern "C" {
 
 // TODO change printf to write
 // Assertion of truth macro
-#define ASSERT(cond, desc) if( !(cond) )\
-{printf( "assertion error, %s, line %d, file(%s)\n", \
-desc, __LINE__, __FILE__ );}
+#define ASSERT(cond, desc, val) if( !(cond) )\
+{int __val = val;\
+fprintf(stderr, "assertion error, %s, line %d, file(%s), function(%s), value(%d)\n", \
+desc, __LINE__, __FILE__, __FUNCTION__, __val);}
 
 
 // DAP return codes
