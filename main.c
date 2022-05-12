@@ -21,34 +21,34 @@
 // app supplied callback prototypes
 void callback(char *s);
 
-// app supplied pattern/callback look up table 
+// app supplied pattern/callback look up table
 const struct DAP_PATTERN_CB relut[] = {
     {"033A", &callback},
     {"033B", &callback},
     {"033C", &callback},
     {"033D", &callback},
-    {"033E", &callback},    
-    {"033F", &callback},    
-    {"033G", &callback},    
-    {"033H", &callback},    
-    {"033I", &callback},    
-    {"033J", &callback},    
-    {"033K", &callback},    
-    {"033L", &callback},    
-    {"033M", &callback},    
-    {"033N", &callback},    
-    {"033O", &callback},    
-    {"033P", &callback},    
-    {"033Q", &callback},    
-    {"033R", &callback},    
-    {"033S", &callback},    
-    {"033T", &callback},    
-    {"033U", &callback},    
-    {"033V", &callback},    
-    {"033W", &callback},    
-    {"033X", &callback},    
-    {"033Y", &callback},    
-    {"033Z", &callback},    
+    {"033E", &callback},
+    {"033F", &callback},
+    {"033G", &callback},
+    {"033H", &callback},
+    {"033I", &callback},
+    {"033J", &callback},
+    {"033K", &callback},
+    {"033L", &callback},
+    {"033M", &callback},
+    {"033N", &callback},
+    {"033O", &callback},
+    {"033P", &callback},
+    {"033Q", &callback},
+    {"033R", &callback},
+    {"033S", &callback},
+    {"033T", &callback},
+    {"033U", &callback},
+    {"033V", &callback},
+    {"033W", &callback},
+    {"033X", &callback},
+    {"033Y", &callback},
+    {"033Z", &callback},
 };
 
 // sample callback function supplied by the app
@@ -66,6 +66,8 @@ int main(int argc, char *argv[]) {
     struct timeval start, end;
     struct DAP_PATTERN_QUEUE q;
 
+    dap_init();
+
     dap_pattern_queue_init(&q);
 
     for (;;){
@@ -73,7 +75,7 @@ int main(int argc, char *argv[]) {
         if (fscanf(stdin, "%s", s) > 0) {
 
             if (strcmp(EXIT_STRING, s) == 0) {
-                ASSERT(0,"NULL POINTER", -1000123)
+                ASSERT(0,"NULL POINTER", "-1000123")
                 // quit
                 exit(0);
             }
@@ -86,7 +88,7 @@ int main(int argc, char *argv[]) {
 
                 elapsedt = elapsed_time(END, &start, &end);
                 fprintf(stdout, "Search time is %lld usecs with %d threads\n", elapsedt, MAXNUMTHR);
-    
+
                 fprintf(stdout,"index in lut = %d,\t string = %s,\t found by thread = %ld, tid = %lu\n",
                 rt.indexlut, rt.out, rt.idx, (unsigned long)rt.tid);
 
@@ -116,4 +118,5 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    dap_shutdown();
 }

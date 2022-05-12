@@ -5,24 +5,31 @@
 extern "C" {
 #endif
 
+#include <pthread.h>
+#include <regex.h>
+#include <stdbool.h>
+#include <termios.h>
+
 // dap.h
 
 // general use macros
 #define ARRAY_SIZE(arr) (sizeof((arr)) / sizeof((arr)[0]))
 
-
-// TODO change printf to write
+// TODO assert change fprintf to write?
 // Assertion of truth macro
-#define ASSERT(cond, desc, val) if( !(cond) )\
-{int __val = val;\
-fprintf(stderr, "assertion error, %s, line %d, file(%s), function(%s), value(%d)\n", \
-desc, __LINE__, __FILE__, __FUNCTION__, __val);}
+#define ASSERT_FAIL     0
+#define ASSERT_PASS     1
+
+#define ASSERT(cond, desc, serror) if( !(cond) )\
+{fprintf(stderr, "assertion error, %s, line %d, file(%s), function(%s), errno(%s)\n", \
+desc, __LINE__, __FILE__, __FUNCTION__, serror);}
 
 
 // DAP return codes
 enum DAP_RETURN_CODES {
     DAP_SUCCESS = 0,
     DAP_DATA_FLUSH_ERROR = -1000,
+    DAP_DATA_INIT_ERROR,
     DAP_DATA_RX_ERROR,
     DAP_DATA_TX_ERROR,
     DAP_DATA_CTRL_ERROR,
@@ -51,7 +58,7 @@ enum DAP_RETURN_CODES {
     DAP_AIO_FIRMWARE_QUERY_ERROR,
     DAP_DATA_CHECKSUM_ERROR,
     DAP_DATA_CHECKSUM_CALC_ERROR,
-    DAP_PROG_ERROR, 
+    DAP_PROG_ERROR,
     DAP_INIT_ERROR,
     DAP_SHUTDOWN_ERROR,
     DAP_DISPLAY_MAP_ERROR,
@@ -70,13 +77,17 @@ enum DAP_RETURN_CODES {
     DAP_DISPLAY_EDIT_ERROR,
     DAP_DISPLAY_MONITOR_ERROR,
     DAP_DISPLAY_BRIGHTNESS_ERROR,
-    DAP_DISPLAY_RG_ERROR, 
+    DAP_DISPLAY_RG_ERROR,
     DAP_DISPLAY_LINE_ERROR,
     DAP_DISPLAY_RECTANGLE_ERROR,
     DAP_DISPLAY_CIRCLE_ERROR,
     DAP_TOUCH_STATUS_ERROR,
 };
 
+// initialization and shutdown functions
+// =======================================
+int dap_init(void);
+int dap_shutdown(void);
 
 // pattern find
 // =============
@@ -138,16 +149,61 @@ void dap_pattern_queue_remove(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESU
 
 // util functions
 
-// elapsed time 
+// elapsed time
 // =============
 
 enum ELTIME {
     START = 0,
     END,
-};   
+};
 
 // returns elaped time from START to END in usec.
 long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *end);
+
+
+// data source management (uart)
+// =============================
+
+#define DAP_UART_BUF_SIZE   1024
+#define DAP_UART_1_BAUD     B9600
+#define DAP_UART_1          ("/dev/ttymxc1")
+#define DAP_UART_2_BAUD     B9600
+#define DAP_UART_2          ("/dev/ttymxc3")
+
+// UART open attributes
+// O_RDWR Read/write access to the serial port
+// O_NOCTTY No terminal will control the process
+// O_NDELAY Use non-blocking I/O
+#define DAP_UART_ACCESS_FLAGS (O_RDWR | O_NOCTTY | O_NDELAY)
+
+enum DAP_DATA_SRC {
+    DAP_DATA_SRC1,          // uart 1
+    DAP_DATA_SRC2,          // uart 2
+};
+
+struct DAP_UART {
+    unsigned char buf_rx[DAP_UART_BUF_SIZE];    // rcv buffer
+    unsigned char buf_tx[DAP_UART_BUF_SIZE];    // tx buffer
+    int fd_uart;                                // file descriptor of uart pipe
+    speed_t baud;
+    struct termios tty;
+};
+
+// function prototypes
+
+// initializes UART port
+int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud);
+// close uart
+void dap_port_close (struct DAP_UART *u);
+// clear uart recieve buffer
+void dap_port_clr_rx_buffer (struct DAP_UART *u);
+// clear uart transmit buffer
+void dap_port_clr_tx_buffer (struct DAP_UART *u);
+// transmit data in  buf_tx buffer
+int dap_port_transmit (struct DAP_UART *u);
+// recieve data in  buf_rx buffer
+int dap_port_recieve (struct DAP_UART *u);
+
 
 #ifdef __cplusplus
 }

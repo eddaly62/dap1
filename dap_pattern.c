@@ -15,7 +15,7 @@
 #include "dap.h"
 
 // TODO - not thread safe
-// variables 
+// variables
 static pthread_t tid;                   // thread id
 static pthread_barrier_t b;             // barrier used to synchronize search threads
 static char in[MAX_PATTERN_BUF_SIZE];   // input buffer
@@ -27,7 +27,7 @@ static int relutsize;
 // clear results array
 static void clearresults(void) {
     int i;
-  
+
     for (i = 0; i < MAXRESULTTBOXES; i++) {
         memset (&reresults[i], 0, sizeof(reresults[i]));
     }
@@ -36,7 +36,7 @@ static void clearresults(void) {
 // get results
 static void getresults(void) {
     long i;
-    
+
     // check results
     for (i = 0; i < MAXNUMTHR; i++) {
 
@@ -66,7 +66,7 @@ static void *thr_fn(void *arg)
     idx = (long)arg;
 
     for (i=0; i < relutsize; i++) {
-        
+
         // only check every nthr entry in LUT
         if (idx == (i+1)%MAXNUMTHR) {
 
@@ -87,7 +87,7 @@ static void *thr_fn(void *arg)
                 memcpy(&reresults[idx].out[0], &in[off], len);
             }
 
-            // cleanup 
+            // cleanup
             regfree(&regex);
         }
     }
@@ -116,11 +116,11 @@ int dap_pattern_find(char *s, const struct DAP_PATTERN_CB *ptnlut, int len, stru
     clearresults();
 
     // get data packet to process
-    strncpy(in, s, sizeof(in));    
+    strncpy(in, s, sizeof(in));
 
     // create thread barrier
     pthread_barrier_init(&b, NULL, MAXRESULTTBOXES);
-    
+
     // create nthr number of threads to search table
     for (i = 0; i < MAXNUMTHR; i++) {
         err = pthread_create(&tid, NULL, thr_fn, (void *)i);

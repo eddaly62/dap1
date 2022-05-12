@@ -36,16 +36,16 @@ bool dap_pattern_queue_is_full(struct DAP_PATTERN_QUEUE *q) {
 
 int dap_pattern_queue_size(struct DAP_PATTERN_QUEUE *q) {
    return (q->qcount);
-}  
+}
 
 // TODO add mutex around memcpy
 void dap_pattern_queue_insert(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESULTS *data) {
 
    if(!dap_pattern_queue_is_full(q)) {
-	
+
       if(q->rear == MAX_PATTERN_Q_SIZE-1) {
-         q->rear = -1;            
-      }       
+         q->rear = -1;
+      }
 
       q->rear++;
       memcpy(&(q->rq[q->rear]), data, sizeof(q->rq[q->rear]));
@@ -55,14 +55,14 @@ void dap_pattern_queue_insert(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESU
 
 // TODO add mutex around memcpy
 void dap_pattern_queue_remove(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESULTS *data) {
-    
+
     memcpy(data, &(q->rq[q->front]), sizeof(q->rq[q->front]));
     q->front++;
 
     if(q->front == MAX_PATTERN_Q_SIZE) {
         q->front = 0;
     }
-	
+
     q->qcount--;
 }
 
