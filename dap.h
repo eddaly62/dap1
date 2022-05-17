@@ -21,13 +21,14 @@ extern "C" {
 #define ASSERT_PASS     1
 
 #define ASSERT(cond, desc, serror) if( !(cond) )\
-{fprintf(stderr, "assertion error, %s, line %d, file(%s), function(%s), errno(%s)\n", \
+{fprintf(stderr, "ASSERT error, %s, line %d, file(%s), function(%s), errno(%s)\n", \
 desc, __LINE__, __FILE__, __FUNCTION__, serror);}
 
 
 // DAP return codes
 enum DAP_RETURN_CODES {
     DAP_SUCCESS = 0,
+    DAP_ERROR = -1,
     DAP_DATA_FLUSH_ERROR = -1000,
     DAP_DATA_INIT_ERROR,
     DAP_DATA_RX_ERROR,
@@ -84,6 +85,14 @@ enum DAP_RETURN_CODES {
     DAP_TOUCH_STATUS_ERROR,
 };
 
+// general definitions used by any dap functions
+// =============================================
+
+// dap pattern callback definitions
+typedef void(*cb_func_c)(char*);
+typedef void(*cb_func_i)(int);
+
+
 // initialization and shutdown functions
 // =======================================
 int dap_init(void);
@@ -101,10 +110,6 @@ int dap_shutdown(void);
 
 #define RE_MATCH 0
 
-// dap pattern callback definitions
-typedef void(*cb_func_c)(char*);
-typedef void(*cb_func_i)(int);
-
 // Pattern/Callback Look Up Table
 struct DAP_PATTERN_CB{
     char pattern[MAX_PATTERN_BUF_SIZE];
@@ -121,7 +126,7 @@ struct DAP_REGEX_RESULTS {
     regoff_t len;                   // length of matched string
 };
 
-// function prototypes
+// public function prototypes
 int dap_pattern_find(char *s, const struct DAP_PATTERN_CB *ptnlut, int len, struct DAP_REGEX_RESULTS *rt);
 
 
@@ -138,7 +143,7 @@ struct DAP_PATTERN_QUEUE {
     struct DAP_REGEX_RESULTS rq[MAX_PATTERN_Q_SIZE];
 };
 
-// function prototypes
+// public function prototypes
 void dap_pattern_queue_init(struct DAP_PATTERN_QUEUE *q);
 void dap_pattern_queue_peek(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESULTS *data);
 bool dap_pattern_queue_is_empty(struct DAP_PATTERN_QUEUE *q);
@@ -157,6 +162,7 @@ enum ELTIME {
     END,
 };
 
+// public function prototypes
 // returns elaped time from START to END in usec.
 long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *end);
 
@@ -164,6 +170,7 @@ long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *e
 // data source management (uart)
 // =============================
 
+// these definitions are platform dependant
 #define DAP_UART_BUF_SIZE   1024
 #define DAP_UART_1_BAUD     B9600
 #define DAP_UART_1          ("/dev/ttymxc1")
@@ -179,17 +186,21 @@ long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *e
 enum DAP_DATA_SRC {
     DAP_DATA_SRC1,          // uart 1
     DAP_DATA_SRC2,          // uart 2
+    DAP_NUM_OF_SRC,         // total number of uarts
 };
 
 struct DAP_UART {
-    unsigned char buf_rx[DAP_UART_BUF_SIZE];    // rcv buffer
-    unsigned char buf_tx[DAP_UART_BUF_SIZE];    // tx buffer
+    unsigned char buf_rx[DAP_UART_BUF_SIZE];    // rcv buffer (circular buffer)
+    unsigned int num_unread;                    // number of unread bytes
+    unsigned char *read_ptr;                    // pntr in buf_rx to start of unread data
+    unsigned char buf_tx[DAP_UART_BUF_SIZE];    // tx buffer (linear buffer)
+    unsigned int num_to_tx;                     // number of bytes to transmit
     int fd_uart;                                // file descriptor of uart pipe
     speed_t baud;
     struct termios tty;
 };
 
-// function prototypes
+// public function prototypes
 
 // initializes UART port
 int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud);
