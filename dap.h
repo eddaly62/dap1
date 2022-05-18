@@ -5,17 +5,18 @@
 extern "C" {
 #endif
 
+// TODO - Review
 #include <pthread.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <termios.h>
+#include <semaphore.h>
 
 // dap.h
 
 // general use macros
 #define ARRAY_SIZE(arr) (sizeof((arr)) / sizeof((arr)[0]))
 
-// TODO assert change fprintf to write?
 // Assertion of truth macro
 #define ASSERT_FAIL     0
 #define ASSERT_PASS     1
@@ -96,7 +97,7 @@ typedef void(*cb_func_i)(int);
 // initialization and shutdown functions
 // =======================================
 int dap_init(void);
-int dap_shutdown(void);
+void dap_shutdown(void);
 
 // pattern find
 // =============
@@ -177,12 +178,6 @@ long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *e
 #define DAP_UART_2_BAUD     B9600
 #define DAP_UART_2          ("/dev/ttymxc3")
 
-// UART open attributes
-// O_RDWR Read/write access to the serial port
-// O_NOCTTY No terminal will control the process
-// O_NDELAY Use non-blocking I/O
-#define DAP_UART_ACCESS_FLAGS (O_RDWR | O_NOCTTY | O_NDELAY)
-
 enum DAP_DATA_SRC {
     DAP_DATA_SRC1,          // uart 1
     DAP_DATA_SRC2,          // uart 2
@@ -198,12 +193,14 @@ struct DAP_UART {
     int fd_uart;                                // file descriptor of uart pipe
     speed_t baud;
     struct termios tty;
+    sem_t *gotdata_sem;
 };
 
 // public function prototypes
+// TODO - list needs refining
 
 // initializes UART port
-int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud);
+int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem);
 // close uart
 void dap_port_close (struct DAP_UART *u);
 // clear uart recieve buffer
@@ -214,6 +211,12 @@ void dap_port_clr_tx_buffer (struct DAP_UART *u);
 int dap_port_transmit (struct DAP_UART *u);
 // recieve data in  buf_rx buffer
 int dap_port_recieve (struct DAP_UART *u);
+// initialize uarts
+int dap_uart_init (void);
+// shut down uarts
+void dap_uart_shutdown (void);
+
+
 
 
 #ifdef __cplusplus
