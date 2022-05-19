@@ -174,9 +174,9 @@ long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *e
 // these definitions are platform dependant
 #define DAP_UART_BUF_SIZE   1024
 #define DAP_UART_1_BAUD     B9600
-#define DAP_UART_1          ("/dev/ttymxc1")
+#define DAP_UART_1          ("/dev/ttymxc1") // Toradex UART2
 #define DAP_UART_2_BAUD     B9600
-#define DAP_UART_2          ("/dev/ttymxc3")
+#define DAP_UART_2          ("/dev/ttymxc3") // Toradex UART3
 
 enum DAP_DATA_SRC {
     DAP_DATA_SRC1,          // uart 1

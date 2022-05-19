@@ -75,7 +75,6 @@ int main(int argc, char *argv[]) {
         if (fscanf(stdin, "%s", s) > 0) {
 
             if (strcmp(EXIT_STRING, s) == 0) {
-                ASSERT(0,"NULL POINTER", "-1000123")
                 // quit
                 exit(0);
             }

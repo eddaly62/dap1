@@ -81,7 +81,7 @@ static int dap_port_init_attributes (struct DAP_UART *u) {
     return DAP_SUCCESS;
 }
 
-
+// TODO - sem init rethink
 // initializes UART port
 int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
 
@@ -155,7 +155,7 @@ static unsigned char* dap_next_addr(struct DAP_UART *u) {
 
     if (ptr >= maxptr){
         // circle back, adjust ptr
-        ptr = ptr - maxptr;
+        ptr = (unsigned char *)(ptr - maxptr);
     }
     ASSERT(((ptr < maxptr) && (ptr >= u->buf_rx)), "UART: first open pointer out of range", "-1")
 
@@ -408,18 +408,19 @@ int dap_uart_init (void) {
         result = DAP_ERROR;
 	}
 
+    // create an epoll object (before creating the epoll thread)
+	result = dap_uart_epoll_init (&uep, &uart1, &uart2);
+	if (result != DAP_SUCCESS) {
+		ASSERT(ASSERT_FAIL, "UART epoll initialization failed", "-1")
+        result = DAP_ERROR;
+	}
+
 	// create thread for reading UART inputs
 	result = pthread_create(&tid_uart, NULL, dap_uart_epoll_thr, NULL); // TODO - input arg to thread
     if (result != 0) {
 		ASSERT(ASSERT_FAIL, "UART epoll thread creation failed", "-1")
         result = DAP_ERROR;
     }
-
-	result = dap_uart_epoll_init (&uep, &uart1, &uart2);
-	if (result != DAP_SUCCESS) {
-		ASSERT(ASSERT_FAIL, "UART epoll initialization failed", "-1")
-        result = DAP_ERROR;
-	}
 
     // TODO - needs fixing
     return result;
