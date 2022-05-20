@@ -1,4 +1,5 @@
 // dap_uart.c
+// TODO - spell recieve correctly (receive)
 
 #include <stdio.h>
 #include <unistd.h>
@@ -35,7 +36,7 @@ struct DAP_UART {
     int fd_uart;                                // file descriptor of uart pipe
     speed_t baud;
     struct termios tty;
-    sem_t *gotdata_sem;
+    sem_t *gotdata_sem;                         // pointer to app provided semaphore
 };
 
 // uart io multiplexing
@@ -69,9 +70,11 @@ static void dap_port_clr_tx_buffer (struct DAP_UART *u) {
 static void dap_port_close (struct DAP_UART *u) {
     close (u->fd_uart);
     u->fd_uart = 0;
-    dap_port_clr_rx_buffer (u);
-    dap_port_clr_tx_buffer (u);
+    dap_port_clr_rx_buffer (u); // TODO remove?
+    dap_port_clr_tx_buffer (u); // TODO remove?
 }
+
+// TODO - add a routine that does a complete clear of a DAP_UART structure
 
 // set uart attributes (helper function)
 static int dap_port_init_attributes (struct DAP_UART *u) {
@@ -226,7 +229,7 @@ static void dap_rx_cp (unsigned int num, unsigned char *src, struct DAP_UART *u)
 // copy recieve data to uart structs (helper function)
 static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
 
-    unsigned int src;
+    int src;
 
     src = dap_which_uart(fd, &uart1, &uart2);
     ASSERT((src != DAP_ERROR), "UART: Can not copy rx data, possible invalid fd", "-1")
@@ -239,6 +242,7 @@ static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
                 ASSERT(ASSERT_FAIL, "UART: Could not post semaphore for uart1", strerror(errno))
             }
         }
+        ASSERT((uart1.gotdata_sem != NULL), "UART, WARNING: semaphore for uart1 is set to NULL", "app not signaled")
         break;
 
         case  DAP_DATA_SRC2:
@@ -248,6 +252,7 @@ static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
                 ASSERT(ASSERT_FAIL, "UART: Could not post semaphore for uart2", strerror(errno))
             }
         }
+        ASSERT((uart2.gotdata_sem != NULL), "UART: WARNING semaphore for uart2 is set to NULL", "app not signaled")
         break;
 
         default:
@@ -261,7 +266,7 @@ static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
 }
 
 // return a pointer to the selected uart struct (helper function)
-static struct DAP_UART *dap_src_select (enum DAP_DATA_SRC ds) {
+static struct DAP_UART * dap_src_select (enum DAP_DATA_SRC ds) {
 
     struct DAP_UART *u = NULL;
 
@@ -275,7 +280,7 @@ static struct DAP_UART *dap_src_select (enum DAP_DATA_SRC ds) {
         break;
 
         default:
-        ASSERT((ds < DAP_NUM_OF_SRC), "UART: Data source out of range", "nothing transmitted")
+        ASSERT((ds < DAP_NUM_OF_SRC), "UART: Data source out of range", "no selection made, rx/tx fail")
         break;
     }
 
@@ -283,7 +288,7 @@ static struct DAP_UART *dap_src_select (enum DAP_DATA_SRC ds) {
 }
 
 // transmit data in  buf_tx buffer
-int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, unsigned int len) {
+int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len) {
 
     int result;
     struct DAP_UART *u;
@@ -295,7 +300,7 @@ int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, unsigned int l
 
     if (len == 0) {
         // no data to transmit
-        return 0;
+        return len;
     }
 
     u = dap_src_select (ds);
@@ -321,30 +326,80 @@ int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, unsigned int l
 
     u->num_to_tx = 0;
 
-    // returns number of bytes transmitted or -1 if failed
+    // returns number of bytes transmitted or error
     return result;
 
 }
 
-// TODO - Rework
-// recieve data in  buf_rx buffer
-int dap_port_recieve (struct DAP_UART *u) {
+// get data from circular buffer (helper function)
+// returns number of bytes transfered to buff or error
+static int dap_rx_get (unsigned char *buff, struct DAP_UART *u) {
+
+    unsigned int i;
+    int numread;
+    unsigned int index;
+    unsigned char *dst;
+
+    ASSERT((buff != NULL), "UART: dst pointer is NULL", "-1")
+    if (buff == NULL) {
+        return DAP_ERROR;
+    }
+    ASSERT((u != NULL), "UART: u pointer is NULL", "-1")
+    if (u == NULL) {
+        return DAP_ERROR;
+    }
+
+    index = u->read_ptr - u->buf_rx;
+    ASSERT((index < DAP_UART_BUF_SIZE), "UART: index to large, seg fault possible", "-1")
+    if (index >= DAP_UART_BUF_SIZE){
+        return DAP_ERROR;
+    }
+
+    // copy data
+    for (i=0; i < u->num_unread; i++) {
+        dst = buff + i;
+        *dst = *(u->buf_rx + index);
+        index++;
+        index = index % DAP_UART_BUF_SIZE;
+    }
+
+    numread = u->num_unread;
+    u->num_unread = 0;
+    return numread;
+}
+
+// receive data, returns number of bytes or error code (negative value), data copied to buff
+int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff) {
 
     int result;
+    int len;
+    struct DAP_UART *u;
 
-    if (u->fd_uart == 0) {
-        ASSERT(ASSERT_FAIL, "Recieve: UART port not open", strerror(errno))
-        return -1;
+    ASSERT((buff != NULL), "UART: Receive, buff pointer is NULL", "DAP_DATA_RX_ERROR")
+    if (buff == NULL) {
+        return DAP_DATA_RX_ERROR;
     }
 
-    result = read(u->fd_uart, u->buf_rx, sizeof(u->buf_rx));    //TODO - size?
-    if (result == -1) {
-        ASSERT(ASSERT_FAIL, "Recieve: Could not recieve UART data", strerror(errno))
+    u = dap_src_select (ds);
+    if (u == NULL) {
+        ASSERT((u != NULL), "UART: Receive, data source out of range", "DAP_DATA_RX_ERROR")
+        return DAP_DATA_RX_ERROR;
     }
 
-    // returns number of bytes recieved, or 0 for EOF, or -1 if failed
+    len = u->num_unread;
+    if (len == 0) {
+        // no data received
+        return len;
+    }
+
+    result = dap_rx_get (buff, u);
+    if (result == DAP_ERROR) {
+        ASSERT((result != DAP_ERROR), "UART: Receive, could not get rx data", "DAP_DATA_RX_ERROR")
+        return DAP_DATA_RX_ERROR;
+    }
+
+    // returns number of bytes returned or -1 if failed
     return result;
-
 }
 
 // Initializing for event polling of rx uart ports
