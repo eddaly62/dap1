@@ -183,10 +183,6 @@ enum DAP_DATA_SRC {
 int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len);
 // receive data, returns number of bytes or error code (negative value), data copied to buff
 int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff);
-// initialize uarts
-int dap_uart_init (void);
-// shut down uarts
-void dap_uart_shutdown (void);
 
 
 #ifdef __cplusplus

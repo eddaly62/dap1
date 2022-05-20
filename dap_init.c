@@ -16,6 +16,8 @@
 #include <termios.h>
 #include "dap.h"
 
+extern void dap_uart_shutdown (void);
+extern int dap_uart_init (void);
 
 // Initialization function
 int dap_init(void) {

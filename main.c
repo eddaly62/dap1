@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include "dap.h"
 
+#define MAX_BUF 1024
 #define EXIT_STRING "q"     // string to type to exit program
 
 // app supplied callback prototypes
@@ -57,7 +58,8 @@ void callback(char *s){
     return;
 }
 
-int main(int argc, char *argv[]) {
+// Test Parsing and Queue APIs
+void ParseQueueTest (void) {
 
     int n;
 	long long elapsedt=0;
@@ -65,8 +67,6 @@ int main(int argc, char *argv[]) {
     struct DAP_REGEX_RESULTS rt;
     struct timeval start, end;
     struct DAP_PATTERN_QUEUE q;
-
-    dap_init();
 
     dap_pattern_queue_init(&q);
 
@@ -116,6 +116,55 @@ int main(int argc, char *argv[]) {
 
         }
     }
+}
 
+// Test DATA (UART) APIs
+
+void UartTest (void) {
+
+#define MESSAGE "Hello World"
+
+    unsigned char rx[MAX_BUF];
+    unsigned char tx[MAX_BUF];
+    int send_len;
+    int rcv_len;
+
+    memcpy(&tx, MESSAGE, strlen(MESSAGE));
+
+    // transmit data in  buf_tx buffer
+    send_len = dap_port_transmit (DAP_DATA_SRC1, tx, 12);
+
+    sleep(1);
+
+    // receive data, returns number of bytes or error code (negative value), data copied to buff
+    rcv_len = dap_port_recieve (DAP_DATA_SRC1, rx);
+
+    fprintf(stdout, "TRANSMIT(%d): %s\n", send_len, tx);
+    fprintf(stdout, "RECEIVE(%d): %s\n", rcv_len, rx);
+
+}
+
+void fini (void) {
+
+    // Shut down DAP
     dap_shutdown();
+}
+
+
+int main (int argc, char *argv[]) {
+
+    atexit (fini);
+
+    // Initialize DAP
+    dap_init ();
+
+#if 0
+    // Test Parsing, Queue, and Elapsed Time APIs
+    ParseQueueTest ();
+#endif
+
+    // UART Test
+    UartTest ();
+
+
 }
