@@ -39,5 +39,6 @@ int dap_init(void) {
 // Shut-down function
 void dap_shutdown (void) {
 
-	// TODO add close for thread and epoll
+	dap_uart_shutdown ();
+
 }

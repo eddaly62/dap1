@@ -171,52 +171,20 @@ long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *e
 // data source management (uart)
 // =============================
 
-// these definitions are platform dependant
-#define DAP_UART_BUF_SIZE   1024
-#define DAP_UART_1_BAUD     B9600
-#define DAP_UART_1          ("/dev/ttymxc1") // Toradex UART2
-#define DAP_UART_2_BAUD     B9600
-#define DAP_UART_2          ("/dev/ttymxc3") // Toradex UART3
-
 enum DAP_DATA_SRC {
     DAP_DATA_SRC1,          // uart 1
     DAP_DATA_SRC2,          // uart 2
     DAP_NUM_OF_SRC,         // total number of uarts
 };
 
-struct DAP_UART {
-    unsigned char buf_rx[DAP_UART_BUF_SIZE];    // rcv buffer (circular buffer)
-    unsigned int num_unread;                    // number of unread bytes
-    unsigned char *read_ptr;                    // pntr in buf_rx to start of unread data
-    unsigned char buf_tx[DAP_UART_BUF_SIZE];    // tx buffer (linear buffer)
-    unsigned int num_to_tx;                     // number of bytes to transmit
-    int fd_uart;                                // file descriptor of uart pipe
-    speed_t baud;
-    struct termios tty;
-    sem_t *gotdata_sem;
-};
-
 // public function prototypes
-// TODO - list needs refining
 
-// initializes UART port
-int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem);
-// close uart
-void dap_port_close (struct DAP_UART *u);
-// clear uart recieve buffer
-void dap_port_clr_rx_buffer (struct DAP_UART *u);
-// clear uart transmit buffer
-void dap_port_clr_tx_buffer (struct DAP_UART *u);
 // transmit data in  buf_tx buffer
-int dap_port_transmit (struct DAP_UART *u);
-// recieve data in  buf_rx buffer
-int dap_port_recieve (struct DAP_UART *u);
+int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, unsigned int len);
 // initialize uarts
 int dap_uart_init (void);
 // shut down uarts
 void dap_uart_shutdown (void);
-
-
 
 
 #ifdef __cplusplus

@@ -10,6 +10,13 @@
 #include <semaphore.h>
 #include "dap.h"
 
+// these definitions are platform dependant
+#define DAP_UART_BUF_SIZE   1024
+#define DAP_UART_1_BAUD     B9600
+#define DAP_UART_1          ("/dev/ttymxc1") // Toradex UART2
+#define DAP_UART_2_BAUD     B9600
+#define DAP_UART_2          ("/dev/ttymxc3") // Toradex UART3
+
 // Maximum number of events to be returned from a single epoll_wait() call
 #define EP_MAX_EVENTS 5
 
@@ -18,6 +25,18 @@
 // O_NOCTTY No terminal will control the process
 // O_NDELAY Use non-blocking I/O
 #define DAP_UART_ACCESS_FLAGS (O_RDWR | O_NOCTTY | O_NDELAY)
+
+struct DAP_UART {
+    unsigned char buf_rx[DAP_UART_BUF_SIZE];    // rcv buffer (circular buffer)
+    unsigned int num_unread;                    // number of unread bytes
+    unsigned char *read_ptr;                    // pntr in buf_rx to start of unread data
+    unsigned char buf_tx[DAP_UART_BUF_SIZE];    // tx buffer (linear buffer)
+    unsigned int num_to_tx;                     // number of bytes to transmit
+    int fd_uart;                                // file descriptor of uart pipe
+    speed_t baud;
+    struct termios tty;
+    sem_t *gotdata_sem;
+};
 
 // uart io multiplexing
 struct DAP_UART_EPOLL {
@@ -34,20 +53,20 @@ static struct DAP_UART_EPOLL uep;
 static pthread_t tid_uart;
 
 // clear uart recieve buffer
-void dap_port_clr_rx_buffer (struct DAP_UART *u) {
+static void dap_port_clr_rx_buffer (struct DAP_UART *u) {
     memset(u->buf_rx, 0, sizeof(u->buf_rx));
     u->read_ptr = u->buf_rx;
     u->num_unread = 0;
 }
 
-// clear uart transmit buffer
-void dap_port_clr_tx_buffer (struct DAP_UART *u) {
+// clear uart transmit buffer (helper function)
+static void dap_port_clr_tx_buffer (struct DAP_UART *u) {
     memset(u->buf_tx, 0, sizeof(u->buf_tx));
     u->num_to_tx = 0;
 }
 
-// close uart
-void dap_port_close (struct DAP_UART *u) {
+// close uart (helper function)
+static void dap_port_close (struct DAP_UART *u) {
     close (u->fd_uart);
     u->fd_uart = 0;
     dap_port_clr_rx_buffer (u);
@@ -94,7 +113,7 @@ int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
     ASSERT((baud != 0), "UART baud rate not intilaized", "0")
     ASSERT((u != NULL), "UART: DAP_UART struct pointer in not intilaized", "0")
     if ((upath[0] == 0) || (baud == 0) || (u == NULL)){
-        return DAP_DATA_INIT_ERROR;
+        return DAP_ERROR;
     }
 
     // save baud and semaphore
@@ -107,13 +126,13 @@ int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
     u->fd_uart = open(upath, DAP_UART_ACCESS_FLAGS);
     if (u->fd_uart == -1 ) {
         ASSERT(ASSERT_FAIL, "Failed to open port", strerror(errno))
-        return DAP_DATA_INIT_ERROR;
+        return DAP_ERROR;
     }
 
     // set com attributes
     if (dap_port_init_attributes(u) != DAP_SUCCESS) {
         ASSERT(ASSERT_FAIL, "Could not intialize UART attributes", strerror(errno))
-        return DAP_DATA_INIT_ERROR;
+        return DAP_ERROR;
     }
 
     tcflush(u->fd_uart, TCIFLUSH);
@@ -214,26 +233,26 @@ static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
 
     switch (src) {
         case DAP_DATA_SRC1:
-            dap_rx_cp (num, buf, &uart1);
-            if (uart1.gotdata_sem != NULL){
-                if (sem_post(uart1.gotdata_sem) == -1) {
-                    ASSERT(ASSERT_FAIL, "UART: Could not post semaphore for uart1", strerror(errno))
-                }
+        dap_rx_cp (num, buf, &uart1);
+        if (uart1.gotdata_sem != NULL){
+            if (sem_post(uart1.gotdata_sem) == -1) {
+                ASSERT(ASSERT_FAIL, "UART: Could not post semaphore for uart1", strerror(errno))
             }
+        }
         break;
 
         case  DAP_DATA_SRC2:
-            dap_rx_cp (num, buf, &uart2);
-            if (uart2.gotdata_sem != NULL){
-                if (sem_post(uart2.gotdata_sem) == -1) {
-                    ASSERT(ASSERT_FAIL, "UART: Could not post semaphore for uart2", strerror(errno))
-                }
+        dap_rx_cp (num, buf, &uart2);
+        if (uart2.gotdata_sem != NULL){
+            if (sem_post(uart2.gotdata_sem) == -1) {
+                ASSERT(ASSERT_FAIL, "UART: Could not post semaphore for uart2", strerror(errno))
             }
+        }
         break;
 
         default:
-            // log error
-            ASSERT(ASSERT_FAIL, "UART: Could not copy rx data", "rx data not copied")
+        // log error
+        ASSERT(ASSERT_FAIL, "UART: Could not copy rx data", "rx data not copied")
         break;
     }
 
@@ -241,28 +260,64 @@ static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
     return src;
 }
 
-// transmit data in  buf_tx buffer
-int dap_port_transmit (struct DAP_UART *u) {
+// return a pointer to the selected uart struct (helper function)
+static struct DAP_UART *dap_src_select (enum DAP_DATA_SRC ds) {
 
-    int result;
+    struct DAP_UART *u = NULL;
 
-    if (u->fd_uart == 0) {
-        ASSERT(ASSERT_FAIL, "UART: Transmit, port not open", strerror(errno))
-        return DAP_ERROR;
+    switch (ds) {
+        case DAP_DATA_SRC1:
+        u = &uart1;
+        break;
+
+        case DAP_DATA_SRC2:
+        u = &uart2;
+        break;
+
+        default:
+        ASSERT((ds < DAP_NUM_OF_SRC), "UART: Data source out of range", "nothing transmitted")
+        break;
     }
 
-    if (u->num_to_tx == 0) {
+    return u;
+}
+
+// transmit data in  buf_tx buffer
+int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, unsigned int len) {
+
+    int result;
+    struct DAP_UART *u;
+
+    ASSERT((buff != NULL), "UART: Transmit, buff pointer is NULL", "DAP_DATA_TX_ERROR")
+    if (buff == NULL) {
+        return DAP_DATA_TX_ERROR;
+    }
+
+    if (len == 0) {
         // no data to transmit
         return 0;
     }
 
+    u = dap_src_select (ds);
+    if (u == NULL) {
+        ASSERT((u != NULL), "UART: Transmit, data source out of range", "nothing transmitted")
+        return DAP_DATA_TX_ERROR;
+    }
+
+    u->num_to_tx = len;
+    memcpy(u->buf_tx, buff, len);
+
+    if (u->fd_uart <= 0) {
+        ASSERT(ASSERT_FAIL, "UART: Transmit, port not open", strerror(errno))
+        return DAP_DATA_TX_ERROR;
+    }
+
     result = write(u->fd_uart, u->buf_tx, u->num_to_tx);
     if (result == -1) {
-        ASSERT((result != -1), "UART: Could not transmit UART data", strerror(errno))
+        ASSERT((result != -1), "UART: Transmit, write data failed", strerror(errno))
+        return DAP_DATA_TX_ERROR;
     }
-    else {
-        ASSERT((result == u->num_to_tx), "UART: Incomplete data write", strerror(errno))
-    }
+    ASSERT((result == u->num_to_tx), "UART: Transmit, incomplete data write", strerror(errno))
 
     u->num_to_tx = 0;
 
@@ -271,7 +326,7 @@ int dap_port_transmit (struct DAP_UART *u) {
 
 }
 
-// TODO - Depricate in future, recieve performed by thr_uart_epoll thread
+// TODO - Rework
 // recieve data in  buf_rx buffer
 int dap_port_recieve (struct DAP_UART *u) {
 
@@ -333,7 +388,6 @@ static int dap_uart_epoll_init (struct DAP_UART_EPOLL *uep, struct DAP_UART *u1,
     return result;
 }
 
-
 // uart rx thread
 static void *dap_uart_epoll_thr(void *arg) {
 
@@ -343,7 +397,7 @@ static void *dap_uart_epoll_thr(void *arg) {
     int src;
     unsigned char buf[DAP_UART_BUF_SIZE];
 
-    uep.numOpenFds = DAP_NUM_OF_SRC; // TODO - needs review
+    uep.numOpenFds = DAP_NUM_OF_SRC;
 
     while (uep.numOpenFds > 0) {
 
@@ -398,31 +452,30 @@ int dap_uart_init (void) {
 	result = dap_port_init (&uart1, DAP_UART_1, DAP_UART_1_BAUD, NULL); // TODO - fix sema
 	if (result != DAP_SUCCESS) {
 		ASSERT(ASSERT_FAIL, "UART 1 Initialization: Can not initialize", "-1")
-        result = DAP_ERROR;
+        return DAP_DATA_INIT_ERROR;
 	}
 
 	// initializes UART port 2
 	result = dap_port_init (&uart1, DAP_UART_2, DAP_UART_2_BAUD, NULL); // TODO - fix sema
 	if (result != DAP_SUCCESS) {
 		ASSERT(ASSERT_FAIL, "UART 2 Initialization: Can not initialize", "-1")
-        result = DAP_ERROR;
+        return DAP_DATA_INIT_ERROR;
 	}
 
     // create an epoll object (before creating the epoll thread)
 	result = dap_uart_epoll_init (&uep, &uart1, &uart2);
 	if (result != DAP_SUCCESS) {
 		ASSERT(ASSERT_FAIL, "UART epoll initialization failed", "-1")
-        result = DAP_ERROR;
+        return DAP_DATA_INIT_ERROR;
 	}
 
 	// create thread for reading UART inputs
-	result = pthread_create(&tid_uart, NULL, dap_uart_epoll_thr, NULL); // TODO - input arg to thread
+	result = pthread_create(&tid_uart, NULL, dap_uart_epoll_thr, NULL);
     if (result != 0) {
 		ASSERT(ASSERT_FAIL, "UART epoll thread creation failed", "-1")
-        result = DAP_ERROR;
+        return DAP_DATA_INIT_ERROR;
     }
 
-    // TODO - needs fixing
     return result;
 }
 
@@ -433,6 +486,9 @@ void dap_uart_shutdown (void) {
 
 	// close uart 2
 	dap_port_close (&uart2);
+
+    // shut down epoll thread
+    uep.numOpenFds = 0;
 
     // TODO add close for thread and epoll
 }
