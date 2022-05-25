@@ -18,9 +18,6 @@
 #define DAP_UART_2_BAUD     B9600
 #define DAP_UART_2          ("/dev/ttymxc3") // Toradex UART3
 
-// Maximum number of events to be returned from a single epoll_wait() call
-#define EP_MAX_EVENTS 5
-
 // UART open attributes
 // O_RDWR Read/write access to the serial port
 // O_NOCTTY No terminal will control the process
@@ -37,20 +34,13 @@ struct DAP_UART {
     speed_t baud;
     struct termios tty;
     sem_t *gotdata_sem;                         // pointer to app provided semaphore
-};
-
-// uart io multiplexing
-struct DAP_UART_EPOLL {
-    int epfd;
-    int numOpenFds;
-    struct epoll_event ev;
-    struct epoll_event evlist[EP_MAX_EVENTS];
+    int status;
+    pthread_t tid;                              // thread id
 };
 
 // UART data structures
 static struct DAP_UART uart1;
 static struct DAP_UART uart2;
-static struct DAP_UART_EPOLL uep;
 static pthread_t tid_uart;
 
 // clear uart recieve buffer
@@ -402,98 +392,34 @@ int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff) {
     return result;
 }
 
-// Initializing for event polling of rx uart ports
-static int dap_uart_epoll_init (struct DAP_UART_EPOLL *uep, struct DAP_UART *u1, struct DAP_UART *u2) {
-
-    // notes:
-    // - epoll requires Linux kernel 2.6 or better
-    // - initialzie all ports with dap_port_init prior to calling
-
-    int result = DAP_SUCCESS;
-
-    // create an epoll descriptor
-    uep->epfd = epoll_create(DAP_NUM_OF_SRC);
-    ASSERT((uep->epfd != -1), "UART EPOLL: Could not create an epoll descriptor - epoll_create", strerror(errno))
-    if (uep->epfd == -1){
-        return DAP_ERROR;
-    }
-
-    if (u1->fd_uart >= 0) {
-        // add the u1 file descriptor to the list of i/o to watch
-        // set interest list: unblocked read possible (EPOLLIN) and input data has been recieved (EPOLLET, edge triggered)
-        uep->ev.data.fd = u1->fd_uart;
-        uep->ev.events = EPOLLIN | EPOLLET;
-        if (epoll_ctl(uep->epfd, EPOLL_CTL_ADD, u1->fd_uart, &uep->ev) == -1) {
-            ASSERT(ASSERT_FAIL, "UART EPOLL: Could not add uart1 - epoll_ctl", strerror(errno))
-            return DAP_ERROR;
-        }
-    }
-
-    if (u2->fd_uart >= 0) {
-        // add the u2 file descriptor to the list of i/o to watch
-        // set interest list: unblocked read possible (EPOLLIN) and input data has been recieved (EPOLLET, edge triggered)
-        uep->ev.data.fd = u2->fd_uart;
-        uep->ev.events = EPOLLIN | EPOLLET;
-        if (epoll_ctl(uep->epfd, EPOLL_CTL_ADD, u2->fd_uart, &uep->ev) == -1) {
-            ASSERT(ASSERT_FAIL, "UART EPOLL: Could not add uart2 - epoll_ctl", strerror(errno))
-            return DAP_ERROR;
-        }
-    }
-
-    return result;
-}
-
 // uart rx thread
-static void *dap_uart_epoll_thr(void *arg) {
+static void *dap_uart_thr(void *arg) {
 
-    int ready;
     int s;
-    int j;
     int src;
     unsigned char buf[DAP_UART_BUF_SIZE];
+    struct DAP_UART *up;
 
-    uep.numOpenFds = DAP_NUM_OF_SRC;
+    up = (struct DAP_UART *)arg;
+    up->tid = pthread_self();
 
-    while (uep.numOpenFds > 0) {
+    while (up->status) {
 
-        /* Fetch up to MAX_EVENTS items from the ready list */
-        ready = epoll_wait(uep.epfd, uep.evlist, EP_MAX_EVENTS, -1);
-        if (ready == -1) {
-            if (errno == EINTR) {   // TODO - add more sigs ?
-                // Restart if interrupted by signal
-                continue;
+        s = read(up->fd_uart, buf, DAP_UART_BUF_SIZE);
+        if (s == -1){
+            if (errno != EAGAIN) {
+                // read error, log, no data to read
+                ASSERT((s != -1), "UART: read error", strerror(errno))
             }
-            else {
-                ASSERT((ready != -1), "UART: epoll_wait error", strerror(errno))
-                return NULL;
-            }
+            // TODO - add more conditions
+        }
+        else {
+            // store data
+            src = dap_uart_rx_copy (s, up->fd_uart, buf);
+            ASSERT((src != DAP_ERROR), "UART: rx data not saved", "-1")
         }
 
-        /* process returned list of events */
-        for (j = 0; j < ready; j++) {
-
-            if (uep.evlist[j].events & EPOLLIN) {
-                s = read(uep.evlist[j].data.fd, buf, DAP_UART_BUF_SIZE);
-                if (s == -1){
-                    // read error, log, no data to read
-                    ASSERT((s != -1), "UART: read error", strerror(errno))
-                }
-                else {
-                    // store data
-                    src = dap_uart_rx_copy (s, uep.evlist[j].data.fd, buf);
-                    ASSERT((src != DAP_ERROR), "UART: rx data not saved", "-1")
-                }
-            }
-            else if (uep.evlist[j].events & EPOLLHUP) {
-                // Hang up event, Lost connection, log
-                ASSERT(ASSERT_FAIL, "UART: Hang up, Lost UART connection", strerror(errno))
-                // close(uep); // TODO - investigate
-            }
-            else if (uep.evlist[j].events & EPOLLERR) {
-                // log epoll error
-                ASSERT(ASSERT_FAIL, "UART: epoll error", strerror(errno))
-            }
-        }
+        usleep(186000);
     }
     return NULL;
 }
@@ -517,19 +443,22 @@ int dap_uart_init (void) {
         return DAP_DATA_INIT_ERROR;
 	}
 
-    // create an epoll object (before creating the epoll thread)
-	result = dap_uart_epoll_init (&uep, &uart1, &uart2);
-	if (result != DAP_SUCCESS) {
-		ASSERT(ASSERT_FAIL, "UART epoll initialization failed", "-1")
-        return DAP_DATA_INIT_ERROR;
-	}
+	// create threads for reading UART inputs
+    uart1.status = true;
+    uart2.status = true;
 
-	// create thread for reading UART inputs
-	result = pthread_create(&tid_uart, NULL, dap_uart_epoll_thr, NULL);
+	result = pthread_create(&tid_uart, NULL, dap_uart_thr, &uart1);
     if (result != 0) {
-		ASSERT(ASSERT_FAIL, "UART epoll thread creation failed", "-1")
+		ASSERT(ASSERT_FAIL, "UART 1 Rx thread creation failed", "-1")
         return DAP_DATA_INIT_ERROR;
     }
+
+	result = pthread_create(&tid_uart, NULL, dap_uart_thr, &uart2);
+    if (result != 0) {
+		ASSERT(ASSERT_FAIL, "UART 2 Rx thread creation failed", "-1")
+        return DAP_DATA_INIT_ERROR;
+    }
+
 
     return result;
 }
@@ -543,7 +472,7 @@ void dap_uart_shutdown (void) {
 	dap_port_close (&uart2);
 
     // shut down epoll thread
-    uep.numOpenFds = 0;
+    uart1.status = false;
+    uart2.status = false;
 
-    // TODO add close for thread and epoll
 }
