@@ -122,7 +122,7 @@ void ParseQueueTest (void) {
 
 void UartTest (void) {
 
-#define MESSAGE "Hello World"
+#define MESSAGE "Hello World_0123456789_0123456789_0123456789\n"
 
     unsigned char rx[MAX_BUF];
     unsigned char tx[MAX_BUF];
@@ -132,15 +132,17 @@ void UartTest (void) {
     memcpy(&tx, MESSAGE, strlen(MESSAGE));
 
     // transmit data in  buf_tx buffer
-    send_len = dap_port_transmit (DAP_DATA_SRC1, tx, 12);
+    send_len = dap_port_transmit (DAP_DATA_SRC1, tx, strlen(MESSAGE));
 
-    sleep(1);
+    sleep(10); //TODO - semaphore
 
     // receive data, returns number of bytes or error code (negative value), data copied to buff
     rcv_len = dap_port_recieve (DAP_DATA_SRC1, rx);
 
     fprintf(stdout, "TRANSMIT(%d): %s\n", send_len, tx);
-    fprintf(stdout, "RECEIVE(%d): %s\n", rcv_len, rx);
+    fprintf(stdout, "RECEIVE(%d) : %s\n", rcv_len,  rx);
+
+    sleep(10); //TODO - join?
 
 }
 

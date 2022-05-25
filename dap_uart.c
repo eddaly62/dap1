@@ -7,16 +7,15 @@
 #include <termios.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/epoll.h>
 #include <semaphore.h>
 #include "dap.h"
 
 // these definitions are platform dependant
 #define DAP_UART_BUF_SIZE   1024
-#define DAP_UART_1_BAUD     B9600
-#define DAP_UART_1          ("/dev/ttymxc1") // Toradex UART2
-#define DAP_UART_2_BAUD     B9600
-#define DAP_UART_2          ("/dev/ttymxc3") // Toradex UART3
+#define DAP_UART_1_BAUD     (B9600)
+#define DAP_UART_1          "/dev/ttymxc1" // Toradex UART2
+#define DAP_UART_2_BAUD     (B9600)
+#define DAP_UART_2          "/dev/ttymxc3" // Toradex UART3
 
 // UART open attributes
 // O_RDWR Read/write access to the serial port
@@ -36,12 +35,14 @@ struct DAP_UART {
     sem_t *gotdata_sem;                         // pointer to app provided semaphore
     int status;
     pthread_t tid;                              // thread id
+    enum DAP_DATA_SRC id;
 };
 
 // UART data structures
 static struct DAP_UART uart1;
 static struct DAP_UART uart2;
 static pthread_t tid_uart;
+pthread_mutex_t cpmutex = PTHREAD_MUTEX_INITIALIZER;
 
 // clear uart recieve buffer
 static void dap_port_clr_rx_buffer (struct DAP_UART *u) {
@@ -59,9 +60,7 @@ static void dap_port_clr_tx_buffer (struct DAP_UART *u) {
 // close uart (helper function)
 static void dap_port_close (struct DAP_UART *u) {
     close (u->fd_uart);
-    u->fd_uart = 0;
-    dap_port_clr_rx_buffer (u); // TODO remove?
-    dap_port_clr_tx_buffer (u); // TODO remove?
+    u->fd_uart = DAP_ERROR;     // don't use 0, 0 = stdin
 }
 
 // TODO - add a routine that does a complete clear of a DAP_UART structure
@@ -69,7 +68,7 @@ static void dap_port_close (struct DAP_UART *u) {
 // set uart attributes (helper function)
 static int dap_port_init_attributes (struct DAP_UART *u) {
 
-    if (u->fd_uart <= 0) {
+    if (u->fd_uart < 0) {
         ASSERT(ASSERT_FAIL, "UART: fd_uart <= 0, can not set attributes", "-1")
         return -1;
     }
@@ -95,7 +94,7 @@ static int dap_port_init_attributes (struct DAP_UART *u) {
 
 // TODO - sem init rethink
 // initializes UART port
-int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
+static int dap_port_init (enum DAP_DATA_SRC uid, struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
 
     int results = DAP_SUCCESS;
 
@@ -110,10 +109,9 @@ int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
     }
 
     // save baud and semaphore
+    u->id = uid;
     u->baud = baud;
-    if (sem != NULL) {
-        u->gotdata_sem = sem;
-    }
+    u->gotdata_sem = sem;
 
     // open serial port
     u->fd_uart = open(upath, DAP_UART_ACCESS_FLAGS);
@@ -133,7 +131,8 @@ int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
     return results;
 }
 
-
+// TODO Needed?
+#if 0
 // given a fd (descriptor) determine which DAP_UART struct to use (helper function)
 static int dap_which_uart(int fd, struct DAP_UART *u1, struct DAP_UART *u2) {
 
@@ -155,6 +154,7 @@ static int dap_which_uart(int fd, struct DAP_UART *u1, struct DAP_UART *u2) {
         return DAP_ERROR;
     }
 }
+#endif
 
 // determine pointer to first open address in circular buffer (helper function)
 static unsigned char* dap_next_addr(struct DAP_UART *u) {
@@ -175,47 +175,61 @@ static unsigned char* dap_next_addr(struct DAP_UART *u) {
 }
 
 // copy data to circular buffer (helper function)
-static void dap_rx_cp (unsigned int num, unsigned char *src, struct DAP_UART *u) {
+static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UART *u) {
 
     unsigned int i;
     unsigned int index;
     unsigned char *ptr;
     unsigned char *dst;
+    unsigned char *srccp;
 
     ASSERT((num != 0), "UART Warning: n is equal to 0, nothing to do", "-1")
     if (num == 0) {
         // nothing to do
-        return;
+        return DAP_ERROR;
     }
     ASSERT((src != NULL), "UART: src pointer is NULL", "-1")
     if (src == NULL) {
-        return;
+        return DAP_ERROR;
     }
     ASSERT((u != NULL), "UART: u pointer is NULL", "-1")
     if (u == NULL) {
-        return;
+        return DAP_ERROR;
     }
+    printf("rx data before inserting in ring buffer = %s\n", src); //TODO remove
 
+
+    srccp = (unsigned char *)src;
     ptr = dap_next_addr(u);
 
+    pthread_mutex_lock(&cpmutex);
+
+    // save new read pointer location
+    u->read_ptr = ptr;
+
     index = ptr - u->buf_rx;
-    ASSERT((index < DAP_UART_BUF_SIZE), "UART: index to large, seg fault possible", "-1")
+    ASSERT((ptr >= u->buf_rx), "UART: index into buf_rx incorrect, seg fault possible", "-1")
 
     // copy data
     for (i=0; i < num; i++) {
         dst = ptr + index;
-        *dst = *src;
-        src++;
+        *dst = *srccp;
+        srccp++;
         index++;
         index = index % DAP_UART_BUF_SIZE;
+        printf("uid=%d, copied char =%c,\n", u->id, *dst); //TODO remove
     }
 
     u->num_unread += num;
     ASSERT((u->num_unread < DAP_UART_BUF_SIZE), "UART: num_unread to large, seg fault possible", "-1")
-    u->read_ptr = ptr + index;
-    ASSERT((index < DAP_UART_BUF_SIZE), "UART: read_ptr to large, seg fault possible", "-1")
+
+    pthread_mutex_unlock(&cpmutex);
+
+    return DAP_SUCCESS;
 }
 
+#if 0
+// TODO needed?
 // copy recieve data to uart structs (helper function)
 static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
 
@@ -254,6 +268,7 @@ static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
     // returns the dap data source that rx was copied to or error
     return src;
 }
+#endif
 
 // return a pointer to the selected uart struct (helper function)
 static struct DAP_UART * dap_src_select (enum DAP_DATA_SRC ds) {
@@ -301,18 +316,20 @@ int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len) {
 
     u->num_to_tx = len;
     memcpy(u->buf_tx, buff, len);
-
+    fprintf(stdout, "buf_tx = %s function(%s)\n",u->buf_tx, __FUNCTION__); // TODO remove
     if (u->fd_uart <= 0) {
         ASSERT(ASSERT_FAIL, "UART: Transmit, port not open", strerror(errno))
         return DAP_DATA_TX_ERROR;
     }
 
     result = write(u->fd_uart, u->buf_tx, u->num_to_tx);
+    fprintf(stdout, "result (bytes written) = %d\n", result); // TODO remove
     if (result == -1) {
         ASSERT((result != -1), "UART: Transmit, write data failed", strerror(errno))
         return DAP_DATA_TX_ERROR;
     }
     ASSERT((result == u->num_to_tx), "UART: Transmit, incomplete data write", strerror(errno))
+    //usleep(186000); //TODO - remove
 
     u->num_to_tx = 0;
 
@@ -323,12 +340,13 @@ int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len) {
 
 // get data from circular buffer (helper function)
 // returns number of bytes transfered to buff or error
-static int dap_rx_get (unsigned char *buff, struct DAP_UART *u) {
+static int dap_rx_get (const unsigned char *buff, struct DAP_UART *u) {
 
     unsigned int i;
     int numread;
     unsigned int index;
     unsigned char *dst;
+    unsigned char *ptr;
 
     ASSERT((buff != NULL), "UART: dst pointer is NULL", "-1")
     if (buff == NULL) {
@@ -340,21 +358,27 @@ static int dap_rx_get (unsigned char *buff, struct DAP_UART *u) {
     }
 
     index = u->read_ptr - u->buf_rx;
-    ASSERT((index < DAP_UART_BUF_SIZE), "UART: index to large, seg fault possible", "-1")
-    if (index >= DAP_UART_BUF_SIZE){
+    printf ("index = %d, funct(%s)\n", index, __FUNCTION__); //TODO remove
+    ASSERT((u->read_ptr >= u->buf_rx) && (index < DAP_UART_BUF_SIZE), "UART: index incorrect, seg fault possible", "-1")
+    if ((index >= DAP_UART_BUF_SIZE) || (u->read_ptr < u->buf_rx)){
         return DAP_ERROR;
     }
 
     // copy data
     for (i=0; i < u->num_unread; i++) {
-        dst = buff + i;
-        *dst = *(u->buf_rx + index);
+        dst = (unsigned char *)buff + i;
+        ptr = u->read_ptr + index;
+        *dst = *ptr;
         index++;
         index = index % DAP_UART_BUF_SIZE;
+        printf("index=%d, i=%d, *read_ptr+index=%c\n",index, i, *dst); //TODO remove
     }
 
     numread = u->num_unread;
+    pthread_mutex_lock(&cpmutex);
     u->num_unread = 0;
+    pthread_mutex_unlock(&cpmutex);
+
     return numread;
 }
 
@@ -370,7 +394,7 @@ int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff) {
         return DAP_DATA_RX_ERROR;
     }
 
-    u = dap_src_select (ds);
+    u = dap_src_select(ds);
     if (u == NULL) {
         ASSERT((u != NULL), "UART: Receive, data source out of range", "DAP_DATA_RX_ERROR")
         return DAP_DATA_RX_ERROR;
@@ -382,7 +406,7 @@ int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff) {
         return len;
     }
 
-    result = dap_rx_get (buff, u);
+    result = dap_rx_get(buff, u);
     if (result == DAP_ERROR) {
         ASSERT((result != DAP_ERROR), "UART: Receive, could not get rx data", "DAP_DATA_RX_ERROR")
         return DAP_DATA_RX_ERROR;
@@ -396,17 +420,21 @@ int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff) {
 static void *dap_uart_thr(void *arg) {
 
     int s;
-    int src;
+    //int src;
     unsigned char buf[DAP_UART_BUF_SIZE];
     struct DAP_UART *up;
 
     up = (struct DAP_UART *)arg;
     up->tid = pthread_self();
+    printf("uid = %d, tid = %lu\n", up->id, up->tid); // TODO remove
 
     while (up->status) {
 
-        s = read(up->fd_uart, buf, DAP_UART_BUF_SIZE);
+        s = read(up->fd_uart, buf, DAP_READ_SIZE);
+        //fprintf(stdout,"read unblocked\n");
+        //fprintf(stdout,"s = %d, errno(%d), strerror(%s)\n", s, errno, strerror(errno));
         if (s == -1){
+
             if (errno != EAGAIN) {
                 // read error, log, no data to read
                 ASSERT((s != -1), "UART: read error", strerror(errno))
@@ -415,11 +443,15 @@ static void *dap_uart_thr(void *arg) {
         }
         else {
             // store data
-            src = dap_uart_rx_copy (s, up->fd_uart, buf);
-            ASSERT((src != DAP_ERROR), "UART: rx data not saved", "-1")
+            //src = dap_uart_rx_copy (s, up->fd_uart, buf);
+            fprintf(stdout, "uid = %d, recieved data = %d bytes\n", up->id, s);
+            dap_rx_cp (s, buf, up);
+
+            //ASSERT((src != DAP_ERROR), "UART: rx data not saved", "-1")
         }
 
-        usleep(186000);
+        //usleep(200000);
+        sleep(1);
     }
     return NULL;
 }
@@ -430,23 +462,24 @@ int dap_uart_init (void) {
     int result = DAP_SUCCESS;
 
 	// initializes UART port 1
-	result = dap_port_init (&uart1, DAP_UART_1, DAP_UART_1_BAUD, NULL); // TODO - fix sema
+	result = dap_port_init (DAP_DATA_SRC1, &uart1, DAP_UART_1, DAP_UART_1_BAUD, NULL); // TODO - fix sema
 	if (result != DAP_SUCCESS) {
 		ASSERT(ASSERT_FAIL, "UART 1 Initialization: Can not initialize", "-1")
         return DAP_DATA_INIT_ERROR;
 	}
 
 	// initializes UART port 2
-	result = dap_port_init (&uart1, DAP_UART_2, DAP_UART_2_BAUD, NULL); // TODO - fix sema
+	result = dap_port_init (DAP_DATA_SRC2, &uart2, DAP_UART_2, DAP_UART_2_BAUD, NULL); // TODO - fix sema
 	if (result != DAP_SUCCESS) {
 		ASSERT(ASSERT_FAIL, "UART 2 Initialization: Can not initialize", "-1")
         return DAP_DATA_INIT_ERROR;
 	}
 
-	// create threads for reading UART inputs
-    uart1.status = true;
+    // set threads to loop
+    uart1.status = true; // TODO - may be a config option 
     uart2.status = true;
 
+	// create threads for reading UART inputs
 	result = pthread_create(&tid_uart, NULL, dap_uart_thr, &uart1);
     if (result != 0) {
 		ASSERT(ASSERT_FAIL, "UART 1 Rx thread creation failed", "-1")
@@ -459,20 +492,21 @@ int dap_uart_init (void) {
         return DAP_DATA_INIT_ERROR;
     }
 
-
     return result;
 }
 
 void dap_uart_shutdown (void) {
+
+    // shut down threads
+    uart1.status = false;
+    uart2.status = false;
+
+    sleep(1); // TODO - use a join operation
 
     // close uart 1
 	dap_port_close (&uart1);
 
 	// close uart 2
 	dap_port_close (&uart2);
-
-    // shut down epoll thread
-    uart1.status = false;
-    uart2.status = false;
 
 }
