@@ -14,6 +14,8 @@
 #include <regex.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <semaphore.h>
+#include <fcntl.h>
 #include "dap.h"
 
 #define MAX_BUF 1024
@@ -59,7 +61,7 @@ void callback(char *s){
 }
 
 // Test Parsing and Queue APIs
-void ParseQueueTest (void) {
+void ParseAndQueueTest (void) {
 
     int n;
 	long long elapsedt=0;
@@ -123,24 +125,47 @@ void ParseQueueTest (void) {
 void UartTest (void) {
 
 #define MESSAGE "Hello World"
+#define U1SEM   "uart1sem"
+#define U2SEM   "uart2sem"
 
     unsigned char rx[MAX_BUF];
     unsigned char tx[MAX_BUF];
     int send_len;
     int rcv_len;
+    sem_t *uart1_sem;
+    sem_t *uart2_sem;
+
+    sem_unlink(U1SEM);
+    sem_unlink(U2SEM);
+
+    uart1_sem = sem_open(U1SEM, O_CREAT, O_RDWR, 0);
+    if (uart1_sem == SEM_FAILED) {
+        fprintf(stderr, "Could not open uart1 semaphore\n");
+    }
+
+    uart2_sem = sem_open(U2SEM, O_CREAT, O_RDWR, 0);
+    if (uart2_sem == SEM_FAILED) {
+        fprintf(stderr, "Could not open uart2 semaphore\n");
+    }
 
     memcpy(&tx, MESSAGE, strlen(MESSAGE));
 
     // transmit data in  buf_tx buffer
     send_len = dap_port_transmit (DAP_DATA_SRC1, tx, 12);
 
-    sleep(1);
+    sleep(1); // TODO remove
+    //sem_wait(uart1_sem);
 
     // receive data, returns number of bytes or error code (negative value), data copied to buff
     rcv_len = dap_port_recieve (DAP_DATA_SRC1, rx);
 
+    sleep(1); //TODO Remove
+
     fprintf(stdout, "TRANSMIT(%d): %s\n", send_len, tx);
     fprintf(stdout, "RECEIVE(%d): %s\n", rcv_len, rx);
+
+    sem_close(uart1_sem);
+    sem_close(uart2_sem);
 
 }
 
@@ -160,7 +185,7 @@ int main (int argc, char *argv[]) {
 
 #if 0
     // Test Parsing, Queue, and Elapsed Time APIs
-    ParseQueueTest ();
+    ParseAndQueueTest ();
 #endif
 
     // UART Test

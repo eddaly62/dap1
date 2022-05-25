@@ -25,6 +25,14 @@ extern "C" {
 {fprintf(stderr, "ASSERT error, %s, line %d, file(%s), function(%s), errno(%s)\n", \
 desc, __LINE__, __FILE__, __FUNCTION__, serror);}
 
+// TODO - add return and switch over?
+#define ASSERTNEW(cond, desc, serror) if( !(cond) )\
+{fprintf(stderr, "ASSERT error, %s, line %d, file(%s), function(%s)\n", \
+desc, __LINE__, __FILE__, __FUNCTION__);}
+
+#define FAIL_IF(EXP,RCODE) {if(EXP) {fprintf(stderr,"errno(%s), file(%s), \
+function(%s), line(%d)\n", strerror(errno), __FILE__, __FUNCTION__,__LINE__); \
+return RCODE;}}
 
 // DAP return codes
 enum DAP_RETURN_CODES {

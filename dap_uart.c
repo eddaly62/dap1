@@ -7,7 +7,7 @@
 #include <termios.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/epoll.h>
+#include <poll.h>
 #include <semaphore.h>
 #include "dap.h"
 
@@ -18,14 +18,14 @@
 #define DAP_UART_2_BAUD     B9600
 #define DAP_UART_2          ("/dev/ttymxc3") // Toradex UART3
 
-// Maximum number of events to be returned from a single epoll_wait() call
-#define EP_MAX_EVENTS 5
+#define READ_SIZE 10
 
 // UART open attributes
 // O_RDWR Read/write access to the serial port
 // O_NOCTTY No terminal will control the process
 // O_NDELAY Use non-blocking I/O
-#define DAP_UART_ACCESS_FLAGS (O_RDWR | O_NOCTTY | O_NDELAY)
+#define DAP_UART_ACCESS_FLAGS (O_RDWR | O_NONBLOCK)
+//#define DAP_UART_ACCESS_FLAGS (O_RDWR | O_NOCTTY | O_NONBLOCK)
 
 struct DAP_UART {
     unsigned char buf_rx[DAP_UART_BUF_SIZE];    // rcv buffer (circular buffer)
@@ -40,17 +40,15 @@ struct DAP_UART {
 };
 
 // uart io multiplexing
-struct DAP_UART_EPOLL {
-    int epfd;
+struct DAP_UART_POLL {
     int numOpenFds;
-    struct epoll_event ev;
-    struct epoll_event evlist[EP_MAX_EVENTS];
+    struct pollfd pfd[DAP_NUM_OF_SRC+1];
 };
 
 // UART data structures
 static struct DAP_UART uart1;
 static struct DAP_UART uart2;
-static struct DAP_UART_EPOLL uep;
+static struct DAP_UART_POLL up;
 static pthread_t tid_uart;
 
 // clear uart recieve buffer
@@ -75,6 +73,7 @@ static void dap_port_close (struct DAP_UART *u) {
 }
 
 // TODO - add a routine that does a complete clear of a DAP_UART structure
+// TODO - baud rate has to be change on the fly
 
 // set uart attributes (helper function)
 static int dap_port_init_attributes (struct DAP_UART *u) {
@@ -121,9 +120,7 @@ int dap_port_init (struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
 
     // save baud and semaphore
     u->baud = baud;
-    if (sem != NULL) {
-        u->gotdata_sem = sem;
-    }
+    u->gotdata_sem = sem;
 
     // open serial port
     u->fd_uart = open(upath, DAP_UART_ACCESS_FLAGS);
@@ -185,9 +182,9 @@ static unsigned char* dap_next_addr(struct DAP_UART *u) {
 }
 
 // copy data to circular buffer (helper function)
-static void dap_rx_cp (unsigned int num, unsigned char *src, struct DAP_UART *u) {
+static void dap_rx_cp (ssize_t num, unsigned char *src, struct DAP_UART *u) {
 
-    unsigned int i;
+    ssize_t i;
     unsigned int index;
     unsigned char *ptr;
     unsigned char *dst;
@@ -220,14 +217,14 @@ static void dap_rx_cp (unsigned int num, unsigned char *src, struct DAP_UART *u)
         index = index % DAP_UART_BUF_SIZE;
     }
 
-    u->num_unread += num;
+    u->num_unread += (unsigned int)num;
     ASSERT((u->num_unread < DAP_UART_BUF_SIZE), "UART: num_unread to large, seg fault possible", "-1")
     u->read_ptr = ptr + index;
     ASSERT((index < DAP_UART_BUF_SIZE), "UART: read_ptr to large, seg fault possible", "-1")
 }
 
 // copy recieve data to uart structs (helper function)
-static int dap_uart_rx_copy (int num, int fd, unsigned char *buf) {
+static int dap_uart_rx_copy (ssize_t num, int fd, unsigned char *buf) {
 
     int src;
 
@@ -312,16 +309,20 @@ int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len) {
     u->num_to_tx = len;
     memcpy(u->buf_tx, buff, len);
 
-    if (u->fd_uart <= 0) {
+    if (u->fd_uart < 0) {
         ASSERT(ASSERT_FAIL, "UART: Transmit, port not open", strerror(errno))
         return DAP_DATA_TX_ERROR;
     }
 
     result = write(u->fd_uart, u->buf_tx, u->num_to_tx);
-    if (result == -1) {
-        ASSERT((result != -1), "UART: Transmit, write data failed", strerror(errno))
-        return DAP_DATA_TX_ERROR;
-    }
+    FAIL_IF((result == -1), DAP_DATA_TX_ERROR)
+
+    // TODO - remove, test FAIL_IF macro
+    //if (result == -1) {
+    //    ASSERT((result != -1), "UART: Transmit, write data failed", strerror(errno))
+    //    return DAP_DATA_TX_ERROR;
+    //}
+
     ASSERT((result == u->num_to_tx), "UART: Transmit, incomplete data write", strerror(errno))
 
     u->num_to_tx = 0;
@@ -402,96 +403,76 @@ int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff) {
     return result;
 }
 
-// Initializing for event polling of rx uart ports
-static int dap_uart_epoll_init (struct DAP_UART_EPOLL *uep, struct DAP_UART *u1, struct DAP_UART *u2) {
+// Initializing for polling of rx uart ports
+static void dap_uart_poll_init (struct DAP_UART *u1, struct DAP_UART *u2) {
 
-    // notes:
-    // - epoll requires Linux kernel 2.6 or better
-    // - initialzie all ports with dap_port_init prior to calling
+    up.pfd[DAP_DATA_SRC1].fd = u1->fd_uart;
+    up.pfd[DAP_DATA_SRC1].events = POLLIN | POLLOUT;
 
-    int result = DAP_SUCCESS;
+    up.pfd[DAP_DATA_SRC2].fd = u2->fd_uart;
+    up.pfd[DAP_DATA_SRC2].events = POLLIN | POLLOUT;
 
-    // create an epoll descriptor
-    uep->epfd = epoll_create(DAP_NUM_OF_SRC);
-    ASSERT((uep->epfd != -1), "UART EPOLL: Could not create an epoll descriptor - epoll_create", strerror(errno))
-    if (uep->epfd == -1){
-        return DAP_ERROR;
-    }
-
-    if (u1->fd_uart >= 0) {
-        // add the u1 file descriptor to the list of i/o to watch
-        // set interest list: unblocked read possible (EPOLLIN) and input data has been recieved (EPOLLET, edge triggered)
-        uep->ev.data.fd = u1->fd_uart;
-        uep->ev.events = EPOLLIN | EPOLLET;
-        if (epoll_ctl(uep->epfd, EPOLL_CTL_ADD, u1->fd_uart, &uep->ev) == -1) {
-            ASSERT(ASSERT_FAIL, "UART EPOLL: Could not add uart1 - epoll_ctl", strerror(errno))
-            return DAP_ERROR;
-        }
-    }
-
-    if (u2->fd_uart >= 0) {
-        // add the u2 file descriptor to the list of i/o to watch
-        // set interest list: unblocked read possible (EPOLLIN) and input data has been recieved (EPOLLET, edge triggered)
-        uep->ev.data.fd = u2->fd_uart;
-        uep->ev.events = EPOLLIN | EPOLLET;
-        if (epoll_ctl(uep->epfd, EPOLL_CTL_ADD, u2->fd_uart, &uep->ev) == -1) {
-            ASSERT(ASSERT_FAIL, "UART EPOLL: Could not add uart2 - epoll_ctl", strerror(errno))
-            return DAP_ERROR;
-        }
-    }
-
-    return result;
+    up.numOpenFds = DAP_NUM_OF_SRC;
 }
 
 // uart rx thread
-static void *dap_uart_epoll_thr(void *arg) {
+static void *dap_uart_poll_thr(void *arg) {
 
     int ready;
-    int s;
+    ssize_t s;
     int j;
     int src;
     unsigned char buf[DAP_UART_BUF_SIZE];
 
-    uep.numOpenFds = DAP_NUM_OF_SRC;
+    while (up.numOpenFds > 0) {
 
-    while (uep.numOpenFds > 0) {
-
+                    //fprintf (stdout,"numOpenFds = %d\n",up.numOpenFds); // TODO REMOVE
+                    //fprintf (stdout,"entered poll thr loop\n"); // TODO REMOVE
         /* Fetch up to MAX_EVENTS items from the ready list */
-        ready = epoll_wait(uep.epfd, uep.evlist, EP_MAX_EVENTS, -1);
+        //ready = epoll_wait(uep.epfd, uep.evlist, EP_MAX_EVENTS, 30000);
+        ready = poll(up.pfd, up.numOpenFds, 100);
+
+                    //fprintf (stdout,"out of poll_wait, ready=%d\n",ready); // TODO REMOVE
+
         if (ready == -1) {
             if (errno == EINTR) {   // TODO - add more sigs ?
                 // Restart if interrupted by signal
                 continue;
             }
             else {
-                ASSERT((ready != -1), "UART: epoll_wait error", strerror(errno))
+                ASSERT((ready != -1), "UART: poll_wait error", strerror(errno))
                 return NULL;
             }
         }
 
         /* process returned list of events */
-        for (j = 0; j < ready; j++) {
+        for (j = 0; j < up.numOpenFds; j++) {
+                    //fprintf (stdout,"j = %d\n",j); // TODO REMOVE
 
-            if (uep.evlist[j].events & EPOLLIN) {
-                s = read(uep.evlist[j].data.fd, buf, DAP_UART_BUF_SIZE);
+            if (up.pfd[j].revents & POLLIN) {
+                s = read(up.pfd[j].fd, buf, READ_SIZE);
+                    //fprintf (stdout,"s = %d\n",s); // TODO REMOVE
+
                 if (s == -1){
                     // read error, log, no data to read
                     ASSERT((s != -1), "UART: read error", strerror(errno))
                 }
                 else {
                     // store data
-                    src = dap_uart_rx_copy (s, uep.evlist[j].data.fd, buf);
+                    src = dap_uart_rx_copy (s, up.pfd[j].fd, buf);
+                    //fprintf (stdout,"src = %d\n",src); // TODO REMOVE
+
                     ASSERT((src != DAP_ERROR), "UART: rx data not saved", "-1")
                 }
             }
-            else if (uep.evlist[j].events & EPOLLHUP) {
+            else if (up.pfd[j].revents & POLLHUP) {
                 // Hang up event, Lost connection, log
                 ASSERT(ASSERT_FAIL, "UART: Hang up, Lost UART connection", strerror(errno))
-                // close(uep); // TODO - investigate
+                //close(up.); // TODO - investigate
             }
-            else if (uep.evlist[j].events & EPOLLERR) {
-                // log epoll error
-                ASSERT(ASSERT_FAIL, "UART: epoll error", strerror(errno))
+            else if (up.pfd[j].revents & POLLERR) {
+                // log poll error
+                ASSERT(ASSERT_FAIL, "UART: poll error", strerror(errno))
             }
         }
     }
@@ -511,21 +492,21 @@ int dap_uart_init (void) {
 	}
 
 	// initializes UART port 2
-	result = dap_port_init (&uart1, DAP_UART_2, DAP_UART_2_BAUD, NULL); // TODO - fix sema
+	result = dap_port_init (&uart2, DAP_UART_2, DAP_UART_2_BAUD, NULL); // TODO - fix sema
 	if (result != DAP_SUCCESS) {
 		ASSERT(ASSERT_FAIL, "UART 2 Initialization: Can not initialize", "-1")
         return DAP_DATA_INIT_ERROR;
 	}
 
-    // create an epoll object (before creating the epoll thread)
-	result = dap_uart_epoll_init (&uep, &uart1, &uart2);
-	if (result != DAP_SUCCESS) {
-		ASSERT(ASSERT_FAIL, "UART epoll initialization failed", "-1")
-        return DAP_DATA_INIT_ERROR;
-	}
+    // initialize for polling uarts
+	dap_uart_poll_init (&uart1, &uart2);
+	//if (result != DAP_SUCCESS) { // TODO REMOVE
+	//	ASSERT(ASSERT_FAIL, "UART epoll initialization failed", "-1")
+    //    return DAP_DATA_INIT_ERROR;
+	//}
 
 	// create thread for reading UART inputs
-	result = pthread_create(&tid_uart, NULL, dap_uart_epoll_thr, NULL);
+	result = pthread_create(&tid_uart, NULL, dap_uart_poll_thr, NULL);
     if (result != 0) {
 		ASSERT(ASSERT_FAIL, "UART epoll thread creation failed", "-1")
         return DAP_DATA_INIT_ERROR;
@@ -542,8 +523,8 @@ void dap_uart_shutdown (void) {
 	// close uart 2
 	dap_port_close (&uart2);
 
-    // shut down epoll thread
-    uep.numOpenFds = 0;
+    // shut down poll thread
+    up.numOpenFds = 0;
 
     // TODO add close for thread and epoll
 }
