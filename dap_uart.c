@@ -16,6 +16,8 @@
 #define DAP_UART_1          "/dev/ttymxc1" // Toradex UART2
 #define DAP_UART_2_BAUD     (B9600)
 #define DAP_UART_2          "/dev/ttymxc3" // Toradex UART3
+#define DAP_READ_SIZE       20
+
 
 // UART open attributes
 // O_RDWR Read/write access to the serial port
@@ -217,7 +219,7 @@ static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UAR
         srccp++;
         index++;
         index = index % DAP_UART_BUF_SIZE;
-        printf("uid=%d, copied char =%c,\n", u->id, *dst); //TODO remove
+        printf("%s: uid=%d, copied char =%c,\n", __FUNCTION__, u->id, *dst); //TODO remove
     }
 
     u->num_unread += num;

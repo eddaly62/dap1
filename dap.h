@@ -171,8 +171,6 @@ long long elapsed_time(enum ELTIME sts, struct timeval *start, struct timeval *e
 // data source management (uart)
 // =============================
 
-#define DAP_READ_SIZE   20
-
 enum DAP_DATA_SRC {
     DAP_DATA_SRC1,          // uart 1
     DAP_DATA_SRC2,          // uart 2
