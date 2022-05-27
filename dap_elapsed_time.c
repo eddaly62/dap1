@@ -13,6 +13,7 @@
 #include <regex.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "dap_config.h"
 #include "dap.h"
 
 // elapse time function

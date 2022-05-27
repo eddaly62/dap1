@@ -13,6 +13,7 @@
 #include <regex.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "dap_config.h"
 #include "dap.h"
 
 
@@ -38,7 +39,6 @@ int dap_pattern_queue_size(struct DAP_PATTERN_QUEUE *q) {
    return (q->qcount);
 }
 
-// TODO add mutex around memcpy
 void dap_pattern_queue_insert(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESULTS *data) {
 
    if(!dap_pattern_queue_is_full(q)) {
@@ -53,7 +53,6 @@ void dap_pattern_queue_insert(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESU
    }
 }
 
-// TODO add mutex around memcpy
 void dap_pattern_queue_remove(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESULTS *data) {
 
     memcpy(data, &(q->rq[q->front]), sizeof(q->rq[q->front]));
@@ -65,5 +64,3 @@ void dap_pattern_queue_remove(struct DAP_PATTERN_QUEUE *q, struct DAP_REGEX_RESU
 
     q->qcount--;
 }
-
-// EOF

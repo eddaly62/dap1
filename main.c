@@ -14,9 +14,11 @@
 #include <regex.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <semaphore.h>
+#include <fcntl.h>
 #include "dap.h"
 
-#define MAX_BUF 1024
+#define MAX_BUF 1024        // test buffer size
 #define EXIT_STRING "q"     // string to type to exit program
 
 // app supplied callback prototypes
@@ -63,7 +65,7 @@ void ParseQueueTest (void) {
 
     int n;
 	long long elapsedt=0;
-    char s[MAX_PATTERN_BUF_SIZE];
+    char s[MAX_BUF];
     struct DAP_REGEX_RESULTS rt;
     struct timeval start, end;
     struct DAP_PATTERN_QUEUE q;
@@ -86,7 +88,7 @@ void ParseQueueTest (void) {
                 dap_pattern_find(s, &relut[0], ARRAY_SIZE(relut), &rt);
 
                 elapsedt = elapsed_time(END, &start, &end);
-                fprintf(stdout, "Search time is %lld usecs with %d threads\n", elapsedt, MAXNUMTHR);
+                fprintf(stdout, "Search time is %lld usecs\n", elapsedt);
 
                 fprintf(stdout,"index in lut = %d,\t string = %s,\t found by thread = %ld, tid = %lu\n",
                 rt.indexlut, rt.out, rt.idx, (unsigned long)rt.tid);
@@ -122,28 +124,38 @@ void ParseQueueTest (void) {
 
 void UartTest (void) {
 
-#define MESSAGE "Hello World_0123456789_0123456789_0123456789\n"
+#define MESSAGE "Start_0123456789_0123456789_0123456789_End\n"
 
+    #define S1NAME "u1sem"
     unsigned char rx[MAX_BUF];
     unsigned char tx[MAX_BUF];
     int send_len;
     int rcv_len;
+    sem_t s1, *s1p;
+
+    sem_unlink(S1NAME);
+    s1p = sem_open(S1NAME, (O_CREAT|O_EXCL), O_RDWR, 0);
+    s1 = *s1p;
+
+    dap_port_set_sem(DAP_DATA_SRC1, &s1);
 
     memcpy(&tx, MESSAGE, strlen(MESSAGE));
 
     // transmit data in  buf_tx buffer
     send_len = dap_port_transmit (DAP_DATA_SRC1, tx, strlen(MESSAGE));
 
-    sleep(10); //TODO - semaphore
+    // wait until data is received
+    sem_wait(&s1);
 
     // receive data, returns number of bytes or error code (negative value), data copied to buff
-    rcv_len = dap_port_recieve (DAP_DATA_SRC1, rx);
+    rcv_len = dap_port_receive (DAP_DATA_SRC1, rx);
 
     fprintf(stdout, "TRANSMIT(%d): %s\n", send_len, tx);
     fprintf(stdout, "RECEIVE(%d) : %s\n", rcv_len,  rx);
 
-    sleep(10); //TODO - join?
+    //sleep(10); //TODO - join?
 
+    sem_close(&s1);
 }
 
 void fini (void) {

@@ -5,26 +5,28 @@
 extern "C" {
 #endif
 
-// TODO - Review
+// dap.h
+
 #include <pthread.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <termios.h>
 #include <semaphore.h>
+#include "dap_config.h"
 
-// dap.h
 
 // general use macros
 #define ARRAY_SIZE(arr) (sizeof((arr)) / sizeof((arr)[0]))
 
+// Test if linux function fails macro
+#define FAIL_IF(EXP, RCODE) {if(EXP) {fprintf(stderr,"errno(%s), file(%s), \
+function(%s), line(%d)\n", strerror(errno), __FILE__, __FUNCTION__,__LINE__); \
+return RCODE;}}
+
 // Assertion of truth macro
-#define ASSERT_FAIL     0
-#define ASSERT_PASS     1
-
-#define ASSERT(cond, desc, serror) if( !(cond) )\
-{fprintf(stderr, "ASSERT error, %s, line %d, file(%s), function(%s), errno(%s)\n", \
-desc, __LINE__, __FILE__, __FUNCTION__, serror);}
-
+#define ASSERT(COND, DESC, RCODE) {if(!(COND)) {fprintf(stderr,"%s, file(%s), \
+function(%s), line(%d)\n", DESC, __FILE__, __FUNCTION__,__LINE__); \
+return RCODE;}}
 
 // DAP return codes
 enum DAP_RETURN_CODES {
@@ -96,15 +98,13 @@ typedef void(*cb_func_i)(int);
 
 // initialization and shutdown functions
 // =======================================
+
 int dap_init(void);
 void dap_shutdown(void);
 
 // pattern find
 // =============
 
-#define MAX_PATTERN_BUF_SIZE 100
-
-#define MAXNUMTHR 2
 #define MAXRESULTTBOXES (MAXNUMTHR+1)
 #define MAXTHRIDX (MAXNUMTHR-1)
 #define RESULTIDX (MAXNUMTHR)
@@ -133,9 +133,6 @@ int dap_pattern_find(char *s, const struct DAP_PATTERN_CB *ptnlut, int len, stru
 
 // pattern queue
 // ==============
-
-// declarations
-#define MAX_PATTERN_Q_SIZE 6
 
 struct DAP_PATTERN_QUEUE {
     int front;
@@ -180,10 +177,12 @@ enum DAP_DATA_SRC {
 // public function prototypes
 
 // transmit data in  buf_tx buffer
-int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len);
+int dap_port_transmit(enum DAP_DATA_SRC ds, unsigned char *buff, int len);
 // receive data, returns number of bytes or error code (negative value), data copied to buff
-int dap_port_recieve (enum DAP_DATA_SRC ds, unsigned char *buff);
-
+int dap_port_receive(enum DAP_DATA_SRC ds, unsigned char *buff);
+// set app provided semaphore
+// used to signal app has data ready to read
+int dap_port_set_sem(enum DAP_DATA_SRC ds, sem_t *s);
 
 #ifdef __cplusplus
 }

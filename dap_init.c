@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <termios.h>
+#include "dap_config.h"
 #include "dap.h"
 
 extern void dap_uart_shutdown (void);
@@ -30,9 +31,7 @@ int dap_init(void) {
 	// TODO  - sig mask init? TBD
 
 	result = dap_uart_init();
-	if (result != DAP_SUCCESS) {
-		ASSERT(ASSERT_FAIL, "UARTs Not intialized", "-1")
-	}
+	ASSERT((result != DAP_ERROR), "UARTs Not intialized", DAP_ERROR)
 
 	return result;
 }
@@ -41,6 +40,7 @@ int dap_init(void) {
 // Shut-down function
 void dap_shutdown (void) {
 
+	// shut down uarts
 	dap_uart_shutdown ();
 
 }

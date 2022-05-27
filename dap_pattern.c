@@ -1,4 +1,5 @@
 // dap_pattern.c
+// TODO - add file and function headers
 
 #include <pthread.h>
 #include <string.h>
@@ -12,9 +13,10 @@
 #include <regex.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "dap_config.h"
 #include "dap.h"
 
-// TODO - not thread safe
+// TODO - not thread safe, make some changes
 // variables
 static pthread_t tid;                   // thread id
 static pthread_barrier_t b;             // barrier used to synchronize search threads
