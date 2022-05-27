@@ -124,38 +124,47 @@ void ParseQueueTest (void) {
 
 void UartTest (void) {
 
-#define MESSAGE "Start_0123456789_0123456789_0123456789_End\n"
+    #define MESSAGE "A123456789\t123456789\t123456789"
+    #define MESSAGE_SIZE    30
+    #define MAX_LOOPS       10
+    #define S1NAME          "u1sem"
 
-    #define S1NAME "u1sem"
     unsigned char rx[MAX_BUF];
     unsigned char tx[MAX_BUF];
     int send_len;
     int rcv_len;
-    sem_t s1, *s1p;
+    sem_t *s1p;
+    int n = 0;
+
 
     sem_unlink(S1NAME);
     s1p = sem_open(S1NAME, (O_CREAT|O_EXCL), O_RDWR, 0);
-    s1 = *s1p;
 
-    dap_port_set_sem(DAP_DATA_SRC1, &s1);
+    dap_port_set_sem(DAP_DATA_SRC1, s1p);
 
     memcpy(&tx, MESSAGE, strlen(MESSAGE));
 
-    // transmit data in  buf_tx buffer
-    send_len = dap_port_transmit (DAP_DATA_SRC1, tx, strlen(MESSAGE));
+    while (n < MAX_LOOPS) {
 
-    // wait until data is received
-    sem_wait(&s1);
+        // transmit data in  buf_tx buffer
+        send_len = dap_port_transmit (DAP_DATA_SRC1, tx, 30);
+        printf("before sem_wait in main\n"); //TODO
+        // wait until data is received
+        sem_wait(s1p);
+        printf("after sem_wait in main\n"); //TODO
 
-    // receive data, returns number of bytes or error code (negative value), data copied to buff
-    rcv_len = dap_port_receive (DAP_DATA_SRC1, rx);
+        // receive data, returns number of bytes or error code (negative value), data copied to buff
+        rcv_len = dap_port_receive (DAP_DATA_SRC1, rx);
+        rx[rcv_len] = 0;
 
-    fprintf(stdout, "TRANSMIT(%d): %s\n", send_len, tx);
-    fprintf(stdout, "RECEIVE(%d) : %s\n", rcv_len,  rx);
+        fprintf(stdout, "TRANSMIT(%d): %s\n", send_len, tx);
+        fprintf(stdout, "RECEIVE(%d) : %s\n", rcv_len,  rx);
 
-    //sleep(10); //TODO - join?
+        //sleep(10); //TODO - join?
+        n++;
+    }
 
-    sem_close(&s1);
+    sem_close(s1p);
 }
 
 void fini (void) {

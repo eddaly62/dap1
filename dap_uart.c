@@ -42,24 +42,37 @@ static void dap_port_close (struct DAP_UART *u) {
     u->fd_uart = DAP_ERROR;     // don't use 0, 0 = stdin
 }
 
+// return a pointer to the selected uart struct (helper function)
+static struct DAP_UART * dap_src_select (enum DAP_DATA_SRC ds) {
+
+    struct DAP_UART *u = NULL;
+
+    switch (ds) {
+        case DAP_DATA_SRC1:
+        u = &uart1;
+        break;
+
+        case DAP_DATA_SRC2:
+        u = &uart2;
+        break;
+
+        default:
+        ASSERT((ds < DAP_NUM_OF_SRC), "UART: Data source out of range", NULL)
+        break;
+    }
+
+    return u;
+}
+
 // set app provided semaphore
 // used to signal app has data ready to read
 int dap_port_set_sem (enum DAP_DATA_SRC ds, sem_t *s) {
 
-    switch(ds)
-    {
-    case DAP_DATA_SRC1:
-        uart1.gotdata_sem = s;
-        break;
+    struct DAP_UART *u;
 
-    case DAP_DATA_SRC2:
-        uart2.gotdata_sem = s;
-        break;
-
-    default:
-        ASSERT((ds < DAP_NUM_OF_SRC), "UART: data source value out of range", DAP_DATA_INIT_ERROR)
-        break;
-    }
+    u = dap_src_select(ds);
+    ASSERT((u != NULL), "UART: null pointer to semaphore", DAP_ERROR)
+    u->gotdata_sem = s;
 
     return DAP_SUCCESS;
 }
@@ -68,9 +81,10 @@ int dap_port_set_sem (enum DAP_DATA_SRC ds, sem_t *s) {
 static int dap_port_init_attributes (struct DAP_UART *u) {
     int results = DAP_SUCCESS;
 
-    ASSERT((u->fd_uart >= 0), "UART: fd_uart <= 0, can not set attributes", DAP_ERROR)
+    ASSERT((u->fd_uart > 2), "UART: fd_uart <= 0, can not set attributes", DAP_ERROR)
 
     tcgetattr(u->fd_uart, &u->tty);     // Get the current attributes of the first serial port
+    FAIL_IF((results != 0), DAP_ERROR)
 
     cfsetispeed(&u->tty, u->baud);      // Set read speed
     cfsetospeed(&u->tty, u->baud);      // Set write speed
@@ -82,13 +96,28 @@ static int dap_port_init_attributes (struct DAP_UART *u) {
     u->tty.c_cflag &= ~CRTSCTS;         // Disable Hardware Flow Control
                                         // TODO - Add Xon/Xoff flow control
 
+    // set for raw mode, no processing by terminal driver
+    // Noncanonical mode, disable signals, extended input processing, and echoing
+    u->tty.c_lflag &= ~(ICANON | ISIG | IEXTEN | ECHO);
+
+    // Disable special handling of CR, NL, and BREAK.
+    // No 8th-bit stripping or parity error handling.
+    // Disable START/STOP output flow control.
+    u->tty.c_iflag &= ~(BRKINT | ICRNL | IGNBRK | IGNCR | INLCR | INPCK | ISTRIP | IXON | PARMRK);
+
+    // Disable all output processing
+    u->tty.c_oflag &= ~OPOST;
+
+    // TODO - evaluate
+    u->tty.c_cc[VMIN] = 1;
+    u->tty.c_cc[VTIME] = 0; // Character-at-a-time input with blocking
+
     results = tcsetattr(u->fd_uart, TCSANOW, &u->tty);
     FAIL_IF((results != 0), DAP_ERROR)
 
     return results;
 }
 
-// TODO - sem init rethink
 // initializes UART port
 static int dap_port_init (enum DAP_DATA_SRC uid, struct DAP_UART *u, char *upath, speed_t baud, sem_t *sem) {
 
@@ -104,6 +133,9 @@ static int dap_port_init (enum DAP_DATA_SRC uid, struct DAP_UART *u, char *upath
     u->id = uid;
     u->baud = baud;
     u->gotdata_sem = sem;
+
+    // initialize read pointer to point to start of buffer
+    u->read_ptr = u->buf_rx;
 
     // open serial port
     u->fd_uart = open(upath, DAP_UART_ACCESS_FLAGS);
@@ -134,6 +166,7 @@ static unsigned char* dap_next_addr (struct DAP_UART *u) {
         // circle back, adjust ptr
         ptr = (unsigned char *)(ptr - maxptr);
     }
+    ASSERT(((ptr>=u->buf_rx) && (ptr < maxptr)), "UART: read_ptr is invalid", NULL)
 
     pthread_mutex_unlock(&cpmutex);
 
@@ -156,7 +189,7 @@ static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UAR
 
     srccp = (unsigned char *)src;
     ptr = dap_next_addr(u);
-    ASSERT((ptr >= u->buf_rx), "UART: ptr into buf_rx incorrect", DAP_ERROR)
+    ASSERT((ptr >= u->buf_rx), "UART: ptr into buf_rx incorrect, too low", DAP_ERROR)
     ASSERT((ptr < (u->buf_rx + DAP_UART_BUF_SIZE)), "UART: ptr into buf_rx incorrect", DAP_ERROR)
 
     pthread_mutex_lock(&cpmutex);
@@ -181,32 +214,13 @@ static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UAR
 
     pthread_mutex_unlock(&cpmutex);
 
+    sem_post(u->gotdata_sem);
+
     ASSERT((u->num_unread < DAP_UART_BUF_SIZE), "UART: num_unread to large", DAP_ERROR)
 
     return DAP_SUCCESS;
 }
 
-// return a pointer to the selected uart struct (helper function)
-static struct DAP_UART * dap_src_select (enum DAP_DATA_SRC ds) {
-
-    struct DAP_UART *u = NULL;
-
-    switch (ds) {
-        case DAP_DATA_SRC1:
-        u = &uart1;
-        break;
-
-        case DAP_DATA_SRC2:
-        u = &uart2;
-        break;
-
-        default:
-        ASSERT((ds < DAP_NUM_OF_SRC), "UART: Data source out of range", NULL)
-        break;
-    }
-
-    return u;
-}
 
 // transmit data in  buf_tx buffer
 int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len) {
@@ -322,13 +336,14 @@ static void *dap_uart_thr (void *arg) {
 
         s = read(up->fd_uart, buf, DAP_READ_SIZE);
         FAIL_IF(((s == -1) && (errno != EAGAIN)), NULL)
-        fprintf(stdout, "uid = %d, received data = %d bytes\n", up->id, s); // TODO remove
-
+        fprintf(stdout, "uid = %d, errno = %d\n", up->id, errno); // TODO remove
         // store data
-        result = dap_rx_cp(s, buf, up);
-        ASSERT((result != DAP_ERROR), "UART: rx data not saved", NULL)
-
-        // interleave rx threads
+        if (s > 0) {
+            result = dap_rx_cp(s, buf, up);
+            ASSERT((result != DAP_ERROR), "UART: rx data not saved", NULL)
+            fprintf(stdout, "uid = %d, received data = %d bytes\n", up->id, s); // TODO remove
+        }
+        // interleave when rx threads run
         if (up->id == DAP_DATA_SRC1) {
             usleep(DAP_UART_1_TPOLL);
         }

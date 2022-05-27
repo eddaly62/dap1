@@ -24,14 +24,21 @@ extern "C" {
 // data source management (uart)
 // =============================
 
-#define DAP_UART_BUF_SIZE   1024
+#define DAP_UART_BUF_SIZE   60
 #define DAP_UART_1_BAUD     (B9600)
 #define DAP_UART_1          "/dev/ttymxc1"  // Toradex UART2
 #define DAP_UART_1_TPOLL    200000          // usec
 #define DAP_UART_2_BAUD     (B9600)
 #define DAP_UART_2          "/dev/ttymxc3"  // Toradex UART3
 #define DAP_UART_2_TPOLL    300000          // usec
-#define DAP_READ_SIZE       20
+#define DAP_READ_SIZE       50
+
+enum DAP_UART_ENABLE {
+    DAP_DATA_SRC1_ENABLE,   // enable uart 1
+    DAP_DATA_SRC1_DISABLE,  // disable uart 1
+    DAP_DATA_SRC2_ENABLE,   // enable uart 2
+    DAP_DATA_SRC2_DISABLE,  // disable uart 2
+};
 
 // UART open attributes
 // O_RDWR Read/write access to the serial port
