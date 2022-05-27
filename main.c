@@ -124,7 +124,7 @@ void ParseQueueTest (void) {
 
 void UartTest (void) {
 
-    #define MESSAGE "A123456789\t123456789\t123456789"
+    #define MESSAGE "A123456789\e123456789\e123456789"
     #define MESSAGE_SIZE    30
     #define MAX_LOOPS       10
     #define S1NAME          "u1sem"
@@ -148,10 +148,9 @@ void UartTest (void) {
 
         // transmit data in  buf_tx buffer
         send_len = dap_port_transmit (DAP_DATA_SRC1, tx, 30);
-        printf("before sem_wait in main\n"); //TODO
+
         // wait until data is received
         sem_wait(s1p);
-        printf("after sem_wait in main\n"); //TODO
 
         // receive data, returns number of bytes or error code (negative value), data copied to buff
         rcv_len = dap_port_receive (DAP_DATA_SRC1, rx);
@@ -160,7 +159,6 @@ void UartTest (void) {
         fprintf(stdout, "TRANSMIT(%d): %s\n", send_len, tx);
         fprintf(stdout, "RECEIVE(%d) : %s\n", rcv_len,  rx);
 
-        //sleep(10); //TODO - join?
         n++;
     }
 

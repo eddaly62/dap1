@@ -185,7 +185,6 @@ static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UAR
     ASSERT((num != 0), "UART Warning: n is equal to 0, nothing to do", DAP_ERROR)
     ASSERT((src != NULL), "UART: src pointer is NULL", DAP_ERROR)
     ASSERT((u != NULL), "UART: u pointer is NULL", DAP_ERROR)
-    printf("rx data before inserting in ring buffer = %s\n", src); //TODO remove
 
     srccp = (unsigned char *)src;
     ptr = dap_next_addr(u);
@@ -208,12 +207,12 @@ static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UAR
         srccp++;
         index++;
         index = index % DAP_UART_BUF_SIZE;
-        printf("%s: uid=%d, copied char =%c,\n", __FUNCTION__, u->id, *dst); //TODO remove
     }
     u->num_unread += num;
 
     pthread_mutex_unlock(&cpmutex);
 
+    // signal to app, got data ready to read
     sem_post(u->gotdata_sem);
 
     ASSERT((u->num_unread < DAP_UART_BUF_SIZE), "UART: num_unread to large", DAP_ERROR)
@@ -241,15 +240,11 @@ int dap_port_transmit (enum DAP_DATA_SRC ds, unsigned char *buff, int len) {
     u->num_to_tx = len;
     memcpy(u->buf_tx, buff, len);
 
-    fprintf(stdout, "buf_tx = %s function(%s)\n",u->buf_tx, __FUNCTION__); // TODO remove
-
     ASSERT((u->fd_uart >= 0), "UART: Transmit, port not open", DAP_DATA_TX_ERROR)
     result = write(u->fd_uart, u->buf_tx, u->num_to_tx);
     FAIL_IF((result == -1), DAP_DATA_TX_ERROR)
 
     ASSERT((result == u->num_to_tx), "UART: Transmit, incomplete data write", DAP_DATA_TX_ERROR)
-
-    fprintf(stdout, "result (bytes written) = %d\n", result); // TODO remove
 
     u->num_to_tx = 0;
 
@@ -274,7 +269,6 @@ static int dap_rx_get (const unsigned char *buff, struct DAP_UART *u) {
     pthread_mutex_lock(&cpmutex);
 
     index = u->read_ptr - u->buf_rx;
-    printf ("index = %d, funct(%s)\n", index, __FUNCTION__); //TODO remove
     ASSERT((u->read_ptr >= u->buf_rx) && (index < DAP_UART_BUF_SIZE), "UART: index incorrect", DAP_ERROR)
 
     // copy data
@@ -284,7 +278,6 @@ static int dap_rx_get (const unsigned char *buff, struct DAP_UART *u) {
         *dst = *ptr;
         index++;
         index = index % DAP_UART_BUF_SIZE;
-        printf("index=%d, i=%d, *read_ptr+index=%c\n",index, i, *dst); //TODO remove
     }
 
     numread = u->num_unread;
@@ -330,18 +323,16 @@ static void *dap_uart_thr (void *arg) {
 
     up = (struct DAP_UART *)arg;
     up->tid = pthread_self();
-    printf("uid = %d, tid = %lu\n", up->id, up->tid); // TODO remove
 
     while (up->status) {
 
         s = read(up->fd_uart, buf, DAP_READ_SIZE);
         FAIL_IF(((s == -1) && (errno != EAGAIN)), NULL)
-        fprintf(stdout, "uid = %d, errno = %d\n", up->id, errno); // TODO remove
+
         // store data
         if (s > 0) {
             result = dap_rx_cp(s, buf, up);
             ASSERT((result != DAP_ERROR), "UART: rx data not saved", NULL)
-            fprintf(stdout, "uid = %d, received data = %d bytes\n", up->id, s); // TODO remove
         }
         // interleave when rx threads run
         if (up->id == DAP_DATA_SRC1) {
@@ -360,11 +351,11 @@ int dap_uart_init (void) {
     int result;
 
 	// initializes UART port 1
-	result = dap_port_init (DAP_DATA_SRC1, &uart1, DAP_UART_1, DAP_UART_1_BAUD, NULL); // TODO - fix sema
+	result = dap_port_init (DAP_DATA_SRC1, &uart1, DAP_UART_1, DAP_UART_1_BAUD, NULL);
     ASSERT((result != DAP_ERROR), "UART 1: Can not initialize", DAP_DATA_INIT_ERROR)
 
 	// initializes UART port 2
-	result = dap_port_init (DAP_DATA_SRC2, &uart2, DAP_UART_2, DAP_UART_2_BAUD, NULL); // TODO - fix sema
+	result = dap_port_init (DAP_DATA_SRC2, &uart2, DAP_UART_2, DAP_UART_2_BAUD, NULL);
     ASSERT((result != DAP_ERROR), "UART 2: Can not initialize", DAP_DATA_INIT_ERROR)
 
     // set threads to loop
