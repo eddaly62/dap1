@@ -29,7 +29,7 @@ struct DAP_UART {
 static struct DAP_UART uart1;
 static struct DAP_UART uart2;
 static pthread_t tid_uart;
-pthread_mutex_t cpmutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t cpmutex = PTHREAD_MUTEX_INITIALIZER;
 
 // clear uart struct (helper function)
 static void dap_clr_uart_struct (struct DAP_UART *u) {
