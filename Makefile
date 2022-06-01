@@ -9,6 +9,7 @@
 # make local - build everything, local target (X86), debug config.
 # make clean - remove all generated files.
 # make allscp - same as 'make all' and "make" and copies test builds to remote target
+# make first - run this the first time you checkout the project
 # make help - displays make options
 #
 # Notes:
@@ -30,7 +31,7 @@ XPREFIX=arm-none-linux-gnueabihf-
 XPATH=/home/gdc419/gcc-linaro/bin
 CC=$(XPATH)/$(XPREFIX)gcc
 AR=$(XPATH)/$(XPREFIX)ar
-CFLAGS=-ggdb -Wall -O0 -DDEBUG
+CFLAGS=-Wall -O0 -g -DDEBUG
 AFLAGS=-cvrs
 
 # Library build
@@ -64,15 +65,15 @@ GEXT=svg
 GBINS=$(patsubst $(GSRC)/%.dot, $(GSRC)/%.$(GEXT), $(GSRCS))
 
 
-all: first lib test graph
+all: lib test graph
 allscp: CP=on
-allscp: first lib test graph
+allscp: lib test graph
 release: CFLAGS=-Wall -O0
-release: first clean lib test graph
+release: clean lib test graph
 local: CC=gcc
 local: AR=ar
 local: TLIBS=bin/dap.a -lpthread
-local: first lib test graph
+local: lib test graph
 
 lib: $(LIB)
 
@@ -118,6 +119,7 @@ help:
 	@echo "make local - build everything, local x86 target, debug config."
 	@echo "make clean - remove all generated files."
 	@echo "make allscp - same as 'make all' and "make" and copies test builds to remote target"
+	@echo "make first - run this the first time you checkout the project"
 
 first:
 	mkdir -p obj

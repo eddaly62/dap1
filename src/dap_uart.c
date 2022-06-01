@@ -29,7 +29,7 @@ struct DAP_UART {
 static struct DAP_UART uart1;
 static struct DAP_UART uart2;
 static pthread_t tid_uart;
-static pthread_mutex_t cpmutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t uartmutex = PTHREAD_MUTEX_INITIALIZER;
 
 // clear uart struct (helper function)
 static void dap_clr_uart_struct (struct DAP_UART *u) {
@@ -157,7 +157,7 @@ static unsigned char* dap_next_addr (struct DAP_UART *u) {
     unsigned char *maxptr;
     unsigned char *ptr;
 
-    pthread_mutex_lock(&cpmutex);
+    pthread_mutex_lock(&uartmutex);
 
     maxptr = u->buf_rx + DAP_UART_BUF_SIZE;
     ptr = u->read_ptr + u->num_unread;
@@ -168,7 +168,7 @@ static unsigned char* dap_next_addr (struct DAP_UART *u) {
     }
     ASSERT(((ptr>=u->buf_rx) && (ptr < maxptr)), "UART: read_ptr is invalid", NULL)
 
-    pthread_mutex_unlock(&cpmutex);
+    pthread_mutex_unlock(&uartmutex);
 
     return ptr;
 }
@@ -191,7 +191,7 @@ static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UAR
     ASSERT((ptr >= u->buf_rx), "UART: ptr into buf_rx incorrect, too low", DAP_ERROR)
     ASSERT((ptr < (u->buf_rx + DAP_UART_BUF_SIZE)), "UART: ptr into buf_rx incorrect", DAP_ERROR)
 
-    pthread_mutex_lock(&cpmutex);
+    pthread_mutex_lock(&uartmutex);
 
     // save new read pointer location, if all data has been read
     if (u->num_unread == 0) {
@@ -210,7 +210,7 @@ static int dap_rx_cp (unsigned int num, const unsigned char *src, struct DAP_UAR
     }
     u->num_unread += num;
 
-    pthread_mutex_unlock(&cpmutex);
+    pthread_mutex_unlock(&uartmutex);
 
     // signal to app, got data ready to read
     sem_post(u->gotdata_sem);
@@ -266,7 +266,7 @@ static int dap_rx_get (const unsigned char *buff, struct DAP_UART *u) {
     ASSERT((buff != NULL), "UART: dst pointer is NULL", DAP_ERROR)
     ASSERT((u != NULL), "UART: u pointer is NULL", DAP_ERROR)
 
-    pthread_mutex_lock(&cpmutex);
+    pthread_mutex_lock(&uartmutex);
 
     index = u->read_ptr - u->buf_rx;
     ASSERT((u->read_ptr >= u->buf_rx) && (index < DAP_UART_BUF_SIZE), "UART: index incorrect", DAP_ERROR)
@@ -282,7 +282,7 @@ static int dap_rx_get (const unsigned char *buff, struct DAP_UART *u) {
 
     numread = u->num_unread;
     u->num_unread = 0;
-    pthread_mutex_unlock(&cpmutex);
+    pthread_mutex_unlock(&uartmutex);
 
     return numread;
 }

@@ -17,6 +17,7 @@
 #include "dap.h"
 
 // TODO - not thread safe, make some changes
+// TODO - needs refactoring
 // variables
 static pthread_t tid;                   // thread id
 static pthread_barrier_t b;             // barrier used to synchronize search threads
@@ -24,6 +25,7 @@ static char in[MAX_PATTERN_BUF_SIZE];   // input buffer
 static struct DAP_REGEX_RESULTS reresults[MAXRESULTTBOXES];
 static struct DAP_PATTERN_CB *re_cb_lut_ptr;
 static int relutsize;
+//static pthread_mutex_t remutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 // clear results array
@@ -36,8 +38,11 @@ static void clearresults(void) {
 }
 
 // get results
-static void getresults(void) {
+static int getresults(void) {
     long i;
+    int result;
+
+    result = DAP_RE_NO_MATCH;
 
     // check results
     for (i = 0; i < MAXNUMTHR; i++) {
@@ -52,30 +57,40 @@ static void getresults(void) {
             reresults[RESULTIDX].idx = reresults[i].idx;
             reresults[RESULTIDX].len = reresults[i].len;
             memcpy(reresults[RESULTIDX].out, reresults[i].out, sizeof(reresults[RESULTIDX].out));
+            return DAP_RE_MATCH;
         }
     }
+    return result;
 }
+
+regex_t regex[2];   // large (64k), do not put on stack
 
 // Pattern matching threads.
 static void *thr_fn(void *arg)
 {
-    regex_t     regex;
     regmatch_t  pmatch[1];
     regoff_t    off, len;
     long idx;
     int i;
+    int r;
 
     idx = (long)arg;
 
-    for (i=0; i < relutsize; i++) {
+    for (i = 0; i < relutsize; i++) {
 
         // only check every nthr entry in LUT
         if (idx == (i+1)%MAXNUMTHR) {
+ //           pthread_mutex_lock(&remutex);
+// cleanup
+            regcomp(&regex[idx], re_cb_lut_ptr[i].pattern, REG_NEWLINE);
+//            r = regcomp(&regex[idx], re_cb_lut_ptr[i].pattern, REG_NEWLINE);
+//            FAIL_IF((r == -1), NULL)
+            r = regexec(&regex[idx], in, ARRAY_SIZE(pmatch), pmatch, 0);
 
-            if (regcomp(&regex, re_cb_lut_ptr[i].pattern, REG_NEWLINE))
-                exit(EXIT_FAILURE);
-
-            if (regexec(&regex, in, ARRAY_SIZE(pmatch), pmatch, 0) == RE_MATCH) {
+ //           FAIL_IF((r == -1), NULL)
+ //           pthread_mutex_unlock(&remutex);
+//REG_NOMATCH
+            if (r == DAP_RE_MATCH) {
                 off = pmatch[0].rm_so;
                 len = pmatch[0].rm_eo - pmatch[0].rm_so;
                 reresults[idx].indexlut = i;
@@ -90,25 +105,29 @@ static void *thr_fn(void *arg)
             }
 
             // cleanup
-            regfree(&regex);
+            regfree(&regex[idx]);
         }
+        // cleanup
+        //regfree(&regex[idx]);
     }
 
     // wait until all threads have finished
-    pthread_barrier_wait(&b);
-
+    // error codes above PTHREAD_BARRIER_SERIAL_THREAD (-1) are trapped
+    r = pthread_barrier_wait(&b);
+//    FAIL_IF((r < -1), NULL)
     return((void *)0);
+
 }
 
 int dap_pattern_find(char *s, const struct DAP_PATTERN_CB *ptnlut, int len, struct DAP_REGEX_RESULTS *rt) {
 
     long i;
     int err;
-    int ret = DAP_SUCCESS;
+    int ret;
 
-    if ((s[0] == 0) || (ptnlut == NULL) || (len == 0)) {
-        return DAP_PATTERN_FIND_ERROR;
-    }
+    ASSERT((s[0] != 0), "DAP PARSE: input string is not initialized", DAP_ERROR)
+    ASSERT((len > 0), "DAP PARSE: zero length input string", DAP_ERROR)
+    ASSERT((ptnlut != NULL), "DAP PARSE: pattern LUT is null pointer", DAP_PATTERN_FIND_ERROR)
 
     // store input args to private vars so threads can access
     re_cb_lut_ptr = (struct DAP_PATTERN_CB*)ptnlut;
@@ -121,27 +140,28 @@ int dap_pattern_find(char *s, const struct DAP_PATTERN_CB *ptnlut, int len, stru
     strncpy(in, s, sizeof(in));
 
     // create thread barrier
-    pthread_barrier_init(&b, NULL, MAXRESULTTBOXES);
+    err = pthread_barrier_init(&b, NULL, MAXRESULTTBOXES);
+    FAIL_IF((err == -1), DAP_PATTERN_FIND_ERROR)
 
     // create nthr number of threads to search table
     for (i = 0; i < MAXNUMTHR; i++) {
         err = pthread_create(&tid, NULL, thr_fn, (void *)i);
-        if (err != 0) {
-            return DAP_PATTERN_FIND_ERROR;
-        }
+        FAIL_IF((err == -1), DAP_PATTERN_FIND_ERROR)
     }
 
     // wait until all threads have finished
-    pthread_barrier_wait(&b);
+    err = pthread_barrier_wait(&b);
+    FAIL_IF((err == -1), DAP_PATTERN_FIND_ERROR)
 
     // all threads have finished, get the results
-    getresults();
+    ret = getresults();
 
     // copy result
     memcpy(rt, &reresults[RESULTIDX], sizeof(reresults[RESULTIDX]));
 
     // deinitialize barrier
-    pthread_barrier_destroy(&b);
+    err = pthread_barrier_destroy(&b);
+    FAIL_IF((err == -1), DAP_PATTERN_FIND_ERROR)
 
     return ret;
 }

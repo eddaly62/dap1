@@ -31,7 +31,7 @@ extern "C" {
 #define DAP_UART_2_BAUD     (B9600)
 #define DAP_UART_2          "/dev/ttymxc3"  // Toradex UART3
 #define DAP_UART_2_TPOLL    300000          // usec
-#define DAP_READ_SIZE       50
+#define DAP_READ_SIZE       50              // set to at least 2 timex max packet size
 
 enum DAP_UART_ENABLE {
     DAP_DATA_SRC1_ENABLE,   // enable uart 1

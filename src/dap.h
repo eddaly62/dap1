@@ -31,7 +31,9 @@ return RCODE;}}
 // DAP return codes
 enum DAP_RETURN_CODES {
     DAP_SUCCESS = 0,
+    DAP_RE_MATCH = 0,
     DAP_ERROR = -1,
+    DAP_RE_NO_MATCH = -2,
     DAP_DATA_FLUSH_ERROR = -1000,
     DAP_DATA_INIT_ERROR,
     DAP_DATA_RX_ERROR,
@@ -108,8 +110,6 @@ void dap_shutdown(void);
 #define MAXRESULTTBOXES (MAXNUMTHR+1)
 #define MAXTHRIDX (MAXNUMTHR-1)
 #define RESULTIDX (MAXNUMTHR)
-
-#define RE_MATCH 0
 
 // Pattern/Callback Look Up Table
 struct DAP_PATTERN_CB{
