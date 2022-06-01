@@ -10,9 +10,8 @@ extern "C" {
 
 // pattern find
 // =============
-
+// TODO - add comment, needed?
 #define MAX_PATTERN_BUF_SIZE    100
-#define MAXNUMTHR   2
 
 
 // pattern queue

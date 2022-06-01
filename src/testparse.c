@@ -18,7 +18,7 @@
 #include <fcntl.h>
 #include "dap.h"
 
-#define MAX_BUF 1024        // test buffer size
+#define MAX_BUF 100         // test buffer size
 #define EXIT_STRING "q"     // string to type to exit program
 
 // app supplied callback prototypes
@@ -54,6 +54,8 @@ const struct DAP_PATTERN_CB relut[] = {
     {"033X", &callback},
     {"033Y", &callback},
     {"033Z", &callback},
+    {"\e[1m", &callback},
+    {"\e[0m", &callback},
 };
 
 // sample callback function supplied by the app
@@ -74,6 +76,8 @@ int ParseQueueTest (void) {
     struct timeval start, end;
     struct DAP_PATTERN_QUEUE q;
 
+    struct DAP_PATTERN_DATA pd;
+
     dap_pattern_queue_init(&q);
 
     for (;;){
@@ -82,23 +86,27 @@ int ParseQueueTest (void) {
 
             if (strcmp(EXIT_STRING, s) == 0) {
                 // quit
-                exit(0);
+                return DAP_SUCCESS;
             }
             else {
 
                 // start timer
                 elapsed_time(START, &start, &end);
-                result = dap_pattern_find(s, &relut[0], ARRAY_SIZE(relut), &rt);
-                ASSERT ((result != DAP_PATTERN_FIND_ERROR), "return error", DAP_ERROR)
-                    printf("returned from find okay\n");
+
+                dap_pattern_set(&relut[0], ARRAY_SIZE(relut), &pd);
+
+                result = dap_pattern_find(s, sizeof(s), &pd);
 
                 elapsedt = elapsed_time(END, &start, &end);
                 fprintf(stdout, "Search time is %lld usecs\n", elapsedt);
 
+                ASSERT((result != DAP_PATTERN_FIND_ERROR), "return error", DAP_ERROR)
+
                 if (result == DAP_RE_MATCH) {
 
-                    fprintf(stdout,"index in lut = %d,\t string = %s,\t found by thread = %ld, tid = %lu\n",
-                    rt.indexlut, rt.out, rt.idx, (unsigned long)rt.tid);
+                    dap_pattern_get(&pd, &rt);
+
+                    fprintf(stdout,"index in lut = %d, string = %s\n", rt.indexlut, rt.out);
 
                     // run callback
                     if (rt.cb != NULL) {
@@ -139,11 +147,15 @@ int ParseQueueTest (void) {
                     for (n = q.front; n <= q.rear; n++) {
                         printf("%s ", q.rq[n].out);
                     }
-                    printf("\n\n");
+                    printf("\n");
 
                 }
+                else if(result == DAP_RE_NO_MATCH) {
+                    printf("No match found\n");
+                }
                 else {
-                    printf("No match found\n\n");
+                    printf("Error during search\n");
+
                 }
             }
         }

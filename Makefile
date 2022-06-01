@@ -4,7 +4,6 @@
 # make and make all - build everything for ARM target, debug config.
 # make lib - build DAP library for ARM target, debug config.
 # make graph - build doc files
-# make test - build test apps for ARM target, debug config.
 # make release - build everything, ARM target, no debug or gdb support, release config.
 # make local - build everything, local target (X86), debug config.
 # make clean - remove all generated files.
@@ -114,7 +113,6 @@ help:
 	@echo "make and make all - build everything for ARM target, debug config."
 	@echo "make lib - build DAP library for ARM target, debug config"
 	@echo "make graph - build doc files"
-	@echo "make test - build test apps for ARM target, debug config."
 	@echo "make release - build everything, ARM target, no debug or gdb support, release config."
 	@echo "make local - build everything, local x86 target, debug config."
 	@echo "make clean - remove all generated files."

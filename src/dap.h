@@ -107,10 +107,6 @@ void dap_shutdown(void);
 // pattern find
 // =============
 
-#define MAXRESULTTBOXES (MAXNUMTHR+1)
-#define MAXTHRIDX (MAXNUMTHR-1)
-#define RESULTIDX (MAXNUMTHR)
-
 // Pattern/Callback Look Up Table
 struct DAP_PATTERN_CB{
     char pattern[MAX_PATTERN_BUF_SIZE];
@@ -118,17 +114,28 @@ struct DAP_PATTERN_CB{
 };
 
 struct DAP_REGEX_RESULTS {
+    char in[MAX_PATTERN_BUF_SIZE];  // input packet
     char out[MAX_PATTERN_BUF_SIZE]; // string matched
-    cb_func_c cb;                   // callback function pulled from lut
+    cb_func_c cb;                   // callback function pulled from pattern/callback lut
     regmatch_t  pmatch[1];          // start and end offset info were in string match was found
-    int indexlut;                   // index in pattern lut match was found
-    long idx;                       // thread index
-    pthread_t tid;                  // thread id
-    regoff_t len;                   // length of matched string
+    int indexlut;                   // index in pattern/callback lut match was found
+    regoff_t len;                   // length of matched pattern
+};
+
+struct DAP_PATTERN_DATA {
+    struct DAP_REGEX_RESULTS rer;           // contains results of re search
+    int relutsize;                          // items in callback lut
+    struct DAP_PATTERN_CB *re_cb_lut_ptr;   // pointer to callback lut
+    regex_t regex;                          // holds result of regcomp, (large, up to 64k)
+    regoff_t off;                           // offset in input packet where pattern match starts
+    int lin;                                // length of input packet to scan
 };
 
 // public function prototypes
-int dap_pattern_find(char *s, const struct DAP_PATTERN_CB *ptnlut, int len, struct DAP_REGEX_RESULTS *rt);
+
+int dap_pattern_set(const struct DAP_PATTERN_CB *cblut, int lutsize, struct DAP_PATTERN_DATA *pd);
+int dap_pattern_get(struct DAP_PATTERN_DATA *pd, struct DAP_REGEX_RESULTS *rt);
+int dap_pattern_find(char *s, int lin, struct DAP_PATTERN_DATA *pd);
 
 
 // pattern queue
