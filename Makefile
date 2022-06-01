@@ -88,7 +88,7 @@ $(LOBJ)/%.o: $(LSRC)/%.c
 
 test: $(TBINS)
 
-$(TBIN)/%: $(TSRC)/%.c
+$(TBIN)/%: $(TSRC)/%.c $(LIB)
 	@echo "\e[1mBuilding Test program $< \e[0m"
 	$(CC) $(CFLAGS) $< -o $@ $(TLIBS)
 	$(if $(findstring on,$(CP)), $(CTT) $(HOST)/$@ $(TARGET), @echo "$@ not copied to remote")

@@ -124,7 +124,7 @@ struct DAP_REGEX_RESULTS {
 
 struct DAP_PATTERN_DATA {
     struct DAP_REGEX_RESULTS rer;           // contains results of re search
-    int relutsize;                          // items in callback lut
+    int relutsize;                          // number of items in callback lut
     struct DAP_PATTERN_CB *re_cb_lut_ptr;   // pointer to callback lut
     regex_t regex;                          // holds result of regcomp, (large, up to 64k)
     regoff_t off;                           // offset in input packet where pattern match starts

@@ -22,6 +22,7 @@ static void clearresults(struct DAP_PATTERN_DATA *pd) {
     memset(&pd->rer, 0x0, sizeof(struct DAP_REGEX_RESULTS));
 }
 
+
 // Pattern matching threads.
 static int dap_scan_cb_lut(struct DAP_PATTERN_DATA *pd)
 {
@@ -82,8 +83,8 @@ int dap_pattern_find(char *s, int lin, struct DAP_PATTERN_DATA *pd) {
 
     int ret;
 
-    ASSERT((s[0] != 0), "DAP PARSE: input string is not initialized", DAP_ERROR)
-    ASSERT((lin > 0), "DAP PARSE: zero length input string", DAP_ERROR)
+    ASSERT((s[0] != 0), "DAP PARSE: input string is not initialized", DAP_PATTERN_FIND_ERROR)
+    ASSERT((lin > 0), "DAP PARSE: zero length input string", DAP_PATTERN_FIND_ERROR)
     ASSERT((pd != NULL), "DAP PARSE: null pointer to pattern data struct", DAP_PATTERN_FIND_ERROR)
 
     // store input args to private vars so threads can access
@@ -99,7 +100,7 @@ int dap_pattern_find(char *s, int lin, struct DAP_PATTERN_DATA *pd) {
     // search callback lut for regular expression match
     ret = dap_scan_cb_lut(pd);
 
-    // returns DAP_RE_MATCH, DAP_RE_NO_MATCH, DAP_ERROR
+    // returns DAP_RE_MATCH, DAP_RE_NO_MATCH, DAP_PATTERN_FIND_ERROR
     return ret;
 }
 

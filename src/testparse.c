@@ -54,12 +54,18 @@ const struct DAP_PATTERN_CB relut[] = {
     {"033X", &callback},
     {"033Y", &callback},
     {"033Z", &callback},
-    {"\e[1m", &callback},
-    {"\e[0m", &callback},
+    {"0123...m", &callback},
+    {{'0', '1', '2', '3', '*', 'm'}, &callback},
+    {{'\e', '[', 'd', 'm'}, &callback},
+    {"\033[0m", &callback},
+    {"[(]+.*[)]+", &callback},  // match any line that has a ( and ) in it
+
 };
+
 
 // sample callback function supplied by the app
 void callback(char *s){
+
     fprintf(stdout, "callback function called, pattern = %s\n", s);
     return;
 }
@@ -75,7 +81,6 @@ int ParseQueueTest (void) {
     struct DAP_REGEX_RESULTS rt;
     struct timeval start, end;
     struct DAP_PATTERN_QUEUE q;
-
     struct DAP_PATTERN_DATA pd;
 
     dap_pattern_queue_init(&q);
